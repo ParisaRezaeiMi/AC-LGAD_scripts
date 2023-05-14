@@ -3,10 +3,10 @@ from pathlib import Path
 import pandas
 from huge_dataframe.SQLiteDataFrame import load_whole_dataframe # https://github.com/SengerM/huge_dataframe
 import plotly.express as px
-from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 from grafica.plotly_utils.utils import set_my_template_as_default
 import numpy
+import scipy.ndimage as ndimage
 
 def calculate_thing(data_values, data_fluctuations, positions_data):
 	_ = set(data_values.index.names).union(set(data_values.columns.names))
@@ -26,6 +26,80 @@ def calculate_thing(data_values, data_fluctuations, positions_data):
 		columns = data_values.columns,
 	)
 	return data_fluctuations/gradient
+
+def filter_nan_gaussian_conserving(arr, sigma):
+	# https://stackoverflow.com/a/61481246/8849755
+	"""Apply a gaussian filter to an array with nans.
+
+	Intensity is only shifted between not-nan pixels and is hence conserved.
+	The intensity redistribution with respect to each single point
+	is done by the weights of available pixels according
+	to a gaussian distribution.
+	All nans in arr, stay nans in gauss.
+	"""
+	nan_msk = numpy.isnan(arr)
+
+	loss = numpy.zeros(arr.shape)
+	loss[nan_msk] = 1
+	loss = ndimage.gaussian_filter(
+			loss, sigma=sigma, mode='constant', cval=1)
+
+	gauss = arr.copy()
+	gauss[nan_msk] = 0
+	gauss = ndimage.gaussian_filter(
+			gauss, sigma=sigma, mode='constant', cval=0)
+	gauss[nan_msk] = numpy.nan
+
+	gauss += loss * arr
+
+	return gauss
+
+def filter_nan_gaussian_conserving2(arr, sigma):
+	# https://stackoverflow.com/a/61481246/8849755
+	"""Apply a gaussian filter to an array with nans.
+
+	Intensity is only shifted between not-nan pixels and is hence conserved.
+	The intensity redistribution with respect to each single point
+	is done by the weights of available pixels according
+	to a gaussian distribution.
+	All nans in arr, stay nans in gauss.
+	"""
+	nan_msk = numpy.isnan(arr)
+
+	loss = numpy.zeros(arr.shape)
+	loss[nan_msk] = 1
+	loss = ndimage.gaussian_filter(
+			loss, sigma=sigma, mode='constant', cval=1)
+
+	gauss = arr / (1-loss)
+	gauss[nan_msk] = 0
+	gauss = ndimage.gaussian_filter(
+			gauss, sigma=sigma, mode='constant', cval=0)
+	gauss[nan_msk] = numpy.nan
+
+	return gauss
+
+def filter_nan_gaussian_david(arr, sigma):
+	# https://stackoverflow.com/a/61481246/8849755
+    """Allows intensity to leak into the nan area.
+    According to Davids answer:
+        https://stackoverflow.com/a/36307291/7128154
+    """
+    gauss = arr.copy()
+    gauss[numpy.isnan(gauss)] = 0
+    gauss = ndimage.gaussian_filter(
+            gauss, sigma=sigma, mode='constant', cval=0)
+
+    norm = numpy.ones(shape=arr.shape)
+    norm[numpy.isnan(arr)] = 0
+    norm = ndimage.gaussian_filter(
+            norm, sigma=sigma, mode='constant', cval=0)
+
+    # avoid RuntimeWarning: invalid value encountered in true_divide
+    norm = numpy.where(norm==0, 1, norm)
+    gauss = gauss/norm
+    gauss[numpy.isnan(arr)] = numpy.nan
+    return gauss
 
 def experiment(bureaucrat:RunBureaucrat):
 	bureaucrat.check_these_tasks_were_run_successfully('TCT_2D_scan')
@@ -157,7 +231,7 @@ def experiment(bureaucrat:RunBureaucrat):
 			
 			fig = go.Figure(
 				data = go.Contour(
-					z = df,
+					z = filter_nan_gaussian_david(df, sigma=2),
 					x = df.columns,
 					y = df.index,
 					contours = dict(
@@ -169,7 +243,7 @@ def experiment(bureaucrat:RunBureaucrat):
 						),
 						start = 0,
 						end = 50e-6,
-						size = 5e-6,
+						size = 2.5e-6,
 					),
 					line_smoothing = 1,
 					colorbar = dict(
