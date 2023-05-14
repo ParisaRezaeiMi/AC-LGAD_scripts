@@ -8,28 +8,6 @@ import plotly.graph_objects as go
 from grafica.plotly_utils.utils import set_my_template_as_default
 import numpy
 
-def plot_heatmaps(df, col):
-	figs = {}
-	for stat in df[col].columns.get_level_values(0).drop_duplicates():
-		numpy_array = numpy.array([df[(col,stat)].query(f'n_channel=={n_channel} and n_pulse==1').to_numpy() for n_channel in df.index.get_level_values('n_channel').drop_duplicates()])
-		fig = px.imshow(
-			numpy_array,
-			title = f'{col} {stat} as a function of position<br><sup>{bureaucrat.run_name}</sup>',
-			aspect = 'equal',
-			labels = dict(
-				color = f'{col} {stat}',
-				x = 'n_x',
-				y = 'n_y',
-			),
-			x = df[(col,stat)].columns.get_level_values(0).drop_duplicates(),
-			y = df[(col,stat)].index.get_level_values(0).drop_duplicates(),
-			facet_col = 0,
-			origin = 'lower',
-		)
-		fig.update_coloraxes(colorbar_title_side='right')
-		figs[stat] = fig
-	return figs
-
 def calculate_thing(data_values, data_fluctuations, positions_data):
 	_ = set(data_values.index.names).union(set(data_values.columns.names))
 	if _ != {'n_x','n_y'}:
@@ -63,121 +41,155 @@ def experiment(bureaucrat:RunBureaucrat):
 		for _ in {'x','y'}: # Remove offset so (0,0) is the center...
 			positions_data[f'{_} (m)'] -= positions_data[f'{_} (m)'].mean()
 		
-		data = parsed_from_waveforms.merge(positions_data, left_index=True, right_index=True)
-		data.set_index(['n_x','n_y'], append=True, inplace=True)
+		data = parsed_from_waveforms
 		data.reset_index('n_waveform', drop=True, inplace=True)
 		
-		# ~ data = data.query('`t_50 (s)`>2e-9 and `t_50 (s)`<4e-9')
-		
-		# Calculate some event-wise stuff...
+		# Calculate some event-wise stuff:
 		data = data.unstack('n_channel')
 		for n_channel in data.columns.get_level_values('n_channel').drop_duplicates():
 			data[('Time from CH1 (s)',n_channel)] = data[('t_20 (s)',n_channel)] - data[('t_50 (s)',1)]
+			
 			data[('Total collected charge (V s)',n_channel)] = data[[('Collected charge (V s)',_) for _ in data.columns.get_level_values('n_channel').drop_duplicates()]].sum(axis=1)
 			data[('Charge shared fraction',n_channel)] = data[('Collected charge (V s)',n_channel)]/data[('Total collected charge (V s)',n_channel)]
-		data = data.stack('n_channel')
-		
-		averages_2D = data.groupby(['n_pulse','n_channel','n_x','n_y']).agg([('average',numpy.nanmedian),('fluctuations',numpy.nanstd)])
-		averages_2D = pandas.pivot_table(
-			data = averages_2D,
-			values = averages_2D.columns,
-			index = ['n_x','n_channel','n_pulse'],
-			columns = 'n_y',
-		)
-		
-		thing = []
-		for col in {'Charge shared fraction','Time from CH1 (s)','t_50 (s)','Amplitude (V)','Total collected charge (V s)','Charge shared fraction'}:
-			figs = plot_heatmaps(averages_2D, col)
-			for stat,fig in figs.items():
-				fig.write_html(
-					employee.path_to_directory_of_my_task/f'{col} {stat}.html',
-					include_plotlyjs = 'cdn',
-				)
-			for _,df in averages_2D.groupby(['n_channel','n_pulse']):
-				n_channel, n_pulse = _
-				df = df.reset_index(['n_channel','n_pulse'], drop=True)
-				_ = calculate_thing(df[(col,'average')], df[(col,'fluctuations')], positions_data)
-				thing.append(
-					{
-						'n_channel': n_channel,
-						'n_pulse': n_pulse,
-						'thing': _,
-						'variable': f"Thing({col}) (m)",
-					}
-				)
-		thing = pandas.concat(
-			[_['thing'] for _ in thing],
-			keys = [(_['variable'],_['n_channel'],_['n_pulse']) for _ in thing],
-			axis = 0,
-		)
-		thing.index.set_names(['variable','n_channel','n_pulse'], level=[0,1,2], inplace=True)
-		
-		for variable, df in thing.groupby('variable'):
-			df = df.query('n_pulse==1')
-			df.reset_index(['variable','n_pulse'], drop=True, inplace=True)
-			numpy_array = numpy.array([_df.to_numpy() for n_channel,_df in df.groupby('n_channel')])
-			fig = px.imshow(
-				numpy_array,
-				title = f'{variable}<br><sup>{bureaucrat.run_name}</sup>',
-				aspect = 'equal',
-				labels = dict(
-					color = variable,
-					x = 'n_x',
-					y = 'n_y',
-				),
-				x = sorted(set(positions_data['x (m)'])),
-				y = sorted(set(positions_data['y (m)'])),
-				zmin = 0,
-				zmax = 33e-6,
-				facet_col = 0,
-				origin = 'lower',
-			)
-			fig.update_coloraxes(colorbar_title_side='right')
-			fig.write_html(
-				employee.path_to_directory_of_my_task/f'{variable}.html',
-				include_plotlyjs = 'cdn',
-			)
 			
+			data[('Total amplitude (V)',n_channel)] = data[[('Amplitude (V)',_) for _ in data.columns.get_level_values('n_channel').drop_duplicates()]].sum(axis=1)
+			data[('Amplitude shared fraction',n_channel)] = data[('Amplitude (V)',n_channel)]/data[('Total amplitude (V)',n_channel)]
+		data = data.stack('n_channel') # Revert.
 		
-		# Calculate variables...ValueError: Index contains duplicate entries, cannot reshape
-
+		# Calculate variables that could be used for the reconstruction:
 		data = data.unstack('n_channel')
 		variables = {}
-		variables['f_horizontal'] = data[('Charge shared fraction',1)] + data[('Charge shared fraction',3)] - data[('Charge shared fraction',2)] - data[('Charge shared fraction',4)]
-		variables['f_vertical'] = data[('Charge shared fraction',1)] + data[('Charge shared fraction',2)] - data[('Charge shared fraction',3)] - data[('Charge shared fraction',4)]
+		for _ in {'Amplitude','Charge'}:
+			variables[f'f_{_.lower()}_horizontal'] = data[(f'{_} shared fraction',1)] + data[(f'{_} shared fraction',3)] - data[(f'{_} shared fraction',2)] - data[(f'{_} shared fraction',4)]
+			variables[f'f_{_.lower()}_vertical'] = data[(f'{_} shared fraction',1)] + data[(f'{_} shared fraction',2)] - data[(f'{_} shared fraction',3)] - data[(f'{_} shared fraction',4)]
 		variables['log_14'] = numpy.log10(data[('Collected charge (V s)',1)]/data[('Collected charge (V s)',4)])
 		variables['log_23'] = numpy.log10(data[('Collected charge (V s)',2)]/data[('Collected charge (V s)',3)])
 		for n_channel in [2,3,4]:
 			variables[f'Time from CH1 of CH{n_channel} (s)'] = data[('Time from CH1 (s)',n_channel)]
+		for n_channel in [1,2,3,4]:
+			variables[f'Amplitude CH{n_channel} (V)'] = data[('Amplitude (V)',n_channel)]
+			variables[f'Collected charge CH{n_channel} (V s)'] = data[('Collected charge (V s)',n_channel)]
 		for _,_2 in variables.items():
 			_2.name = _
-		data = data.stack('n_channel')
 		variables = pandas.concat([item for _,item in variables.items()], axis=1)
+		data = data.stack('n_channel') # Revert what I have done before.
 		
-		variables = variables.groupby(['n_pulse','n_x','n_y']).agg([('average',numpy.nanmedian),('fluctuations',numpy.nanstd)])
-		for col in variables.columns.get_level_values(0).drop_duplicates():
-			variables[(col,'relative fluctuations')] = variables[(col,'fluctuations')] / abs(variables[(col,'average')])
+		# Add xy position information:
+		variables = variables.merge(positions_data[['n_x','n_y']], left_index=True, right_index=True)
+		variables.set_index(['n_x','n_y'], append=True, inplace=True)
+		
+		# Get rid of `n_pulse` since I will not use it here:
+		variables = variables.query('n_pulse==1')
+		variables.reset_index('n_pulse',drop=True,inplace=True)
+		
+		# Calculate statistics position-wise and create 2D table:
+		variables = variables.groupby(['n_x','n_y']).agg([('average',numpy.nanmedian),('fluctuations',numpy.nanstd)])
 		variables = pandas.pivot_table(
 			data = variables,
 			values = variables.columns,
-			index = ['n_x','n_pulse'],
+			index = 'n_x',
 			columns = 'n_y',
 		)
 		
-		for col in variables.columns.get_level_values(0).drop_duplicates():
-			for stat in variables[col].columns.get_level_values(0).drop_duplicates():
-				df = variables.query('n_pulse==1').reset_index('n_pulse', drop=True)[(col,stat)]
+		# Calculate `thing` for each variable:
+		_things = []
+		for variable_name in variables.columns.get_level_values(0).drop_duplicates():
+			thing = calculate_thing(variables[(variable_name,'average')],variables[(variable_name,'fluctuations')],positions_data)
+			_things.append(
+				dict(
+					variable = variable_name,
+					thing = thing,
+				)
+			)
+		thing = pandas.concat(
+			[_['thing'] for _ in _things],
+			keys = [(_['variable']) for _ in _things],
+			axis = 0,
+		)
+		thing.index.set_names(['variable'], level=[0], inplace=True)
+		
+		# Do plots:
+		for variable_name in variables.columns.get_level_values(0).drop_duplicates():
+			df = variables[variable_name]
+			for stat in df.columns.get_level_values(0).drop_duplicates():
+				df2 = df[stat]
+				df2.set_index(pandas.Index(sorted(set(positions_data['x (m)']))), inplace=True)
+				df2 = df2.T.set_index(pandas.Index(sorted(set(positions_data['y (m)']))), 'y (m)').T
+				df2.index.name = 'x (m)'
+				df2.columns.name = 'y (m)'
 				fig = px.imshow(
-					df,
-					title = f'{col} {stat}<br><sup>{bureaucrat.run_name}</sup>',
-					zmax = .4,#numpy.nanmedian(df) + 2*numpy.nanstd(df),
-					zmin = 0,#numpy.nanmedian(df) - 2*numpy.nanstd(df),
+					df2.T,
+					title = f'{variable_name}<br><sup>{bureaucrat.run_name}</sup>',
+					aspect = 'equal',
+					labels = dict(
+						color = f'{variable_name} {stat}',
+					),
 					origin = 'lower',
 				)
+				fig.update_coloraxes(colorbar_title_side='right')
 				fig.write_html(
-					employee.path_to_directory_of_my_task/f'{col}_{stat}.html',
+					employee.path_to_directory_of_my_task/f'{variable_name} {stat}.html',
 					include_plotlyjs = 'cdn',
 				)
+		
+		for variable_name,df in thing.groupby('variable'):
+			df.set_index(pandas.Index(sorted(set(positions_data['x (m)']))), inplace=True)
+			df = df.T.set_index(pandas.Index(sorted(set(positions_data['y (m)']))), 'y (m)').T
+			df.index.name = 'x (m)'
+			df.columns.name = 'y (m)'
+			df = df.T
+			fig = px.imshow(
+				df,
+				title = f'Thing({variable_name})<br><sup>{bureaucrat.run_name}</sup>',
+				aspect = 'equal',
+				labels = dict(
+					color = f'Thing({variable_name}) (m)',
+				),
+				origin = 'lower',
+				zmin = 0,
+				zmax = 33e-6,
+			)
+			fig.update_coloraxes(colorbar_title_side='right')
+			fig.write_html(
+				employee.path_to_directory_of_my_task/f'{variable_name} thing.html',
+				include_plotlyjs = 'cdn',
+			)
+			
+			fig = go.Figure(
+				data = go.Contour(
+					z = df,
+					x = df.columns,
+					y = df.index,
+					contours = dict(
+						# ~ coloring ='heatmap',
+						showlabels = True,
+						labelfont = dict( # label font properties
+								size = 12,
+								color = 'white',
+						),
+						start = 0,
+						end = 50e-6,
+						size = 5e-6,
+					),
+					line_smoothing = 1,
+					colorbar = dict(
+						title = f'Thing({variable_name}) (m)',
+						titleside = 'right',
+					),
+				),
+			)
+			fig.update_layout(
+				title = f'Thing({variable_name})<br><sup>{bureaucrat.run_name}</sup>',
+				xaxis_title = df.columns.name,
+				yaxis = dict(
+					scaleanchor = 'x',
+					title = df.index.name,
+				),
+			)
+			fig.write_html(
+				employee.path_to_directory_of_my_task/f'{variable_name} thing contour.html',
+				include_plotlyjs = 'cdn',
+			)
 
 if __name__ == '__main__':
 	import argparse
