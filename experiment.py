@@ -187,12 +187,13 @@ def experiment(bureaucrat:RunBureaucrat):
 			df = variables[variable_name]
 			for stat in df.columns.get_level_values(0).drop_duplicates():
 				df2 = df[stat]
-				df2.set_index(pandas.Index(sorted(set(positions_data['x (m)']))), inplace=True)
+				df2.set_index(pandas.Index(sorted(set(positions_data['x (m)']))[::-1]), inplace=True)
 				df2 = df2.T.set_index(pandas.Index(sorted(set(positions_data['y (m)']))), 'y (m)').T
 				df2.index.name = 'x (m)'
 				df2.columns.name = 'y (m)'
+				df2 = df2.T
 				fig = px.imshow(
-					df2.T,
+					df2,
 					title = f'{variable_name}<br><sup>{bureaucrat.run_name}</sup>',
 					aspect = 'equal',
 					labels = dict(
@@ -207,7 +208,7 @@ def experiment(bureaucrat:RunBureaucrat):
 				)
 		
 		for variable_name,df in thing.groupby('variable'):
-			df.set_index(pandas.Index(sorted(set(positions_data['x (m)']))), inplace=True)
+			df.set_index(pandas.Index(sorted(set(positions_data['x (m)']))[::-1]), inplace=True)
 			df = df.T.set_index(pandas.Index(sorted(set(positions_data['y (m)']))), 'y (m)').T
 			df.index.name = 'x (m)'
 			df.columns.name = 'y (m)'
