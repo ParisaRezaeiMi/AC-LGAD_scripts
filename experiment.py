@@ -136,13 +136,21 @@ def experiment(bureaucrat:RunBureaucrat):
 		for _ in {'Amplitude','Charge'}:
 			variables[f'f_{_.lower()}_horizontal'] = data[(f'{_} shared fraction',1)] + data[(f'{_} shared fraction',3)] - data[(f'{_} shared fraction',2)] - data[(f'{_} shared fraction',4)]
 			variables[f'f_{_.lower()}_vertical'] = data[(f'{_} shared fraction',1)] + data[(f'{_} shared fraction',2)] - data[(f'{_} shared fraction',3)] - data[(f'{_} shared fraction',4)]
-		variables['log_14'] = numpy.log10(data[('Collected charge (V s)',1)]/data[('Collected charge (V s)',4)])
-		variables['log_23'] = numpy.log10(data[('Collected charge (V s)',2)]/data[('Collected charge (V s)',3)])
+			variables[f'log_14_SF_{_}'] = numpy.log10(data[(f'{_} shared fraction',1)]/data[(f'{_} shared fraction',4)])
+			variables[f'log_23_SF_{_}'] = numpy.log10(data[(f'{_} shared fraction',2)]/data[(f'{_} shared fraction',3)])
+			for n_channel in [1,2,3,4]:
+				variables[f'{_} shared fraction CH{n_channel}'] = data[(f'{_} shared fraction',n_channel)]
+		for _ in {'Amplitude (V)','Collected charge (V s)'}:
+			variables[f'log_14_{_}'] = numpy.log10(data[(_,1)]/data[(_,4)])
+			variables[f'log_23_{_}'] = numpy.log10(data[(_,2)]/data[(_,3)])
 		for n_channel in [2,3,4]:
 			variables[f'Time from CH1 of CH{n_channel} (s)'] = data[('Time from CH1 (s)',n_channel)]
 		for n_channel in [1,2,3,4]:
 			variables[f'Amplitude CH{n_channel} (V)'] = data[('Amplitude (V)',n_channel)]
 			variables[f'Collected charge CH{n_channel} (V s)'] = data[('Collected charge (V s)',n_channel)]
+			variables[f'Time over 50% CH{n_channel} (s)'] = data[('Time over 50% (s)',n_channel)]
+		variables['Total collected charge (V s)'] = data[('Total collected charge (V s)',1)]
+		variables['Total amplitude (V)'] = data[('Total amplitude (V)',1)]
 		for _,_2 in variables.items():
 			_2.name = _
 		variables = pandas.concat([item for _,item in variables.items()], axis=1)
