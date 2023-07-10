@@ -39,7 +39,7 @@ class RSDReconstructor:
 		
 		self._positions_columns = positions.columns
 		self._features_columns = features.columns
-	
+		
 	def reconstruct(self, features):
 		"""Perform a reconstruction of positions given the observed features.
 		
@@ -79,141 +79,182 @@ class SVMReconstructor(RSDReconstructor):
 				X = scaled_features,
 				y = scaled_positions[col],
 			)
-	
+		
 	def reconstruct(self, features):
 		super().reconstruct(features=features)
 		
+		scaled_features = features.copy()
+		for feature in scaled_features.columns:
+			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
+		
 		reconstructed = pandas.DataFrame(index=features.index)
 		for col in self._positions_columns:
-			reconstructed[col] = self._svrs[col].predict(X = features)
+			reconstructed[col] = self._svrs[col].predict(X = scaled_features)
 			reconstructed[col] = self.scalers[col].inverse_transform(reconstructed[[col]])
 		return reconstructed
+
+class ChargeImbalanceReconstructor(RSDReconstructor):
+	def __init__(self, pads_arrangement):
+		self.pads_arrangement = pads_arrangement
+		
+	def fit(self, positions, features):
+		super().fit(positions=positions, features=features) # Performs some data curation and general stuff common to any method.
 
 def reconstruction_experiment(bureaucrat:RunBureaucrat):
 	bureaucrat.check_these_tasks_were_run_successfully('TCT_2D_scan')
 	
-	with bureaucrat.handle_task('reconstruction_experiment') as employee:
-		if len(bureaucrat.list_subruns_of_task('TCT_2D_scan')) != 1:
-			raise RuntimeError(f'Run {repr(bureaucrat.run_name)} located in "{bureaucrat.path_to_run_directory}" seems to be corrupted because I was expecting only a single subrun for the task "TCT_2D_scan" but it actually has {len(bureaucrat.list_subruns_of_task("TCT_2D_scan"))} subruns...')
-		flattened_1D_scan_subrun_bureaucrat = bureaucrat.list_subruns_of_task('TCT_2D_scan')[0]
-		parsed_from_waveforms = load_whole_dataframe(flattened_1D_scan_subrun_bureaucrat.path_to_directory_of_task('TCT_1D_scan')/'parsed_from_waveforms.sqlite')
+	POSITION_VARIABLES_NAMES = ['x (m)','y (m)']
+	
+	# Load data:
+	if len(bureaucrat.list_subruns_of_task('TCT_2D_scan')) != 1:
+		raise RuntimeError(f'Run {repr(bureaucrat.run_name)} located in "{bureaucrat.path_to_run_directory}" seems to be corrupted because I was expecting only a single subrun for the task "TCT_2D_scan" but it actually has {len(bureaucrat.list_subruns_of_task("TCT_2D_scan"))} subruns...')
+	flattened_1D_scan_subrun_bureaucrat = bureaucrat.list_subruns_of_task('TCT_2D_scan')[0]
+	parsed_from_waveforms = load_whole_dataframe(flattened_1D_scan_subrun_bureaucrat.path_to_directory_of_task('TCT_1D_scan')/'parsed_from_waveforms.sqlite')
+	
+	positions_data = pandas.read_pickle(bureaucrat.path_to_directory_of_task('TCT_2D_scan')/'positions.pickle')
+	positions_data.reset_index(['n_x','n_y'], drop=False, inplace=True)
+	for _ in {'x','y'}: # Remove offset so (0,0) is the center...
+		positions_data[f'{_} (m)'] -= positions_data[f'{_} (m)'].mean()
+	
+	data = parsed_from_waveforms
+	data.reset_index('n_waveform', drop=True, inplace=True)
+	
+	data = data.query('n_pulse==1')
+	data.reset_index('n_pulse', drop=True, inplace=True)
+	
+	pads_arrangement = pandas.read_csv(
+		bureaucrat.path_to_run_directory/'pads_arrangement.csv',
+		index_col = 'n_channel',
+		dtype = {
+			'n_channel': int,
+			'n_row': int,
+			'n_col': int,
+		},
+	)
+	
+	# Calculate some event-wise stuff:
+	data = data.unstack('n_channel')
+	for n_channel in data.columns.get_level_values('n_channel').drop_duplicates():
+		data[('Time from CH1 (s)',n_channel)] = data[('t_20 (s)',n_channel)] - data[('t_50 (s)',1)]
 		
-		positions_data = pandas.read_pickle(bureaucrat.path_to_directory_of_task('TCT_2D_scan')/'positions.pickle')
-		positions_data.reset_index(['n_x','n_y'], drop=False, inplace=True)
-		for _ in {'x','y'}: # Remove offset so (0,0) is the center...
-			positions_data[f'{_} (m)'] -= positions_data[f'{_} (m)'].mean()
+		data[('Total collected charge (V s)',n_channel)] = data[[('Collected charge (V s)',_) for _ in data.columns.get_level_values('n_channel').drop_duplicates()]].sum(axis=1)
+		data[('Charge shared fraction',n_channel)] = data[('Collected charge (V s)',n_channel)]/data[('Total collected charge (V s)',n_channel)]
 		
-		data = parsed_from_waveforms
-		data.reset_index('n_waveform', drop=True, inplace=True)
-		
-		data = data.query('n_pulse==1')
-		data.reset_index('n_pulse', drop=True, inplace=True)
-		
-		# Calculate some event-wise stuff:
-		data = data.unstack('n_channel')
-		for n_channel in data.columns.get_level_values('n_channel').drop_duplicates():
-			data[('Time from CH1 (s)',n_channel)] = data[('t_20 (s)',n_channel)] - data[('t_50 (s)',1)]
-			
-			data[('Total collected charge (V s)',n_channel)] = data[[('Collected charge (V s)',_) for _ in data.columns.get_level_values('n_channel').drop_duplicates()]].sum(axis=1)
-			data[('Charge shared fraction',n_channel)] = data[('Collected charge (V s)',n_channel)]/data[('Total collected charge (V s)',n_channel)]
-			
-			data[('Total amplitude (V)',n_channel)] = data[[('Amplitude (V)',_) for _ in data.columns.get_level_values('n_channel').drop_duplicates()]].sum(axis=1)
-			data[('Amplitude shared fraction',n_channel)] = data[('Amplitude (V)',n_channel)]/data[('Total amplitude (V)',n_channel)]
-		data = data.stack('n_channel') # Revert.
-		
-		# Calculate variables that could be used for the reconstruction:
-		data = data.unstack('n_channel')
-		variables = {}
-		for _ in {'Amplitude'}:
-			variables[f'f_{_.lower()}_horizontal'] = data[(f'{_} shared fraction',1)] + data[(f'{_} shared fraction',3)] - data[(f'{_} shared fraction',2)] - data[(f'{_} shared fraction',4)]
-			variables[f'f_{_.lower()}_vertical'] = data[(f'{_} shared fraction',1)] + data[(f'{_} shared fraction',2)] - data[(f'{_} shared fraction',3)] - data[(f'{_} shared fraction',4)]
-		for _,_2 in variables.items():
-			_2.name = _
-		variables = pandas.concat([item for _,item in variables.items()], axis=1)
-		data = data.stack('n_channel') # Revert what I have done before.
+		data[('Total amplitude (V)',n_channel)] = data[[('Amplitude (V)',_) for _ in data.columns.get_level_values('n_channel').drop_duplicates()]].sum(axis=1)
+		data[('Amplitude shared fraction',n_channel)] = data[('Amplitude (V)',n_channel)]/data[('Total amplitude (V)',n_channel)]
+	data = data.stack('n_channel') # Revert.
+	
+	# Calculate variables that could be used for the reconstruction:
+	data = data.unstack('n_channel')
+	variables = {}
+	for _ in {'Amplitude'}:
+		variables[f'f_{_.lower()}_horizontal'] = data[(f'{_} shared fraction',1)] + data[(f'{_} shared fraction',3)] - data[(f'{_} shared fraction',2)] - data[(f'{_} shared fraction',4)]
+		variables[f'f_{_.lower()}_vertical'] = data[(f'{_} shared fraction',1)] + data[(f'{_} shared fraction',2)] - data[(f'{_} shared fraction',3)] - data[(f'{_} shared fraction',4)]
+	for _,_2 in variables.items():
+		_2.name = _
+	variables = pandas.concat([item for _,item in variables.items()], axis=1)
+	data = data.stack('n_channel') # Revert what I have done before.
 
-		variables = variables.merge(positions_data[['x (m)','y (m)']], left_index=True, right_index=True)
-		
-		variables.dropna(inplace=True)
-		
-		position_variables = ['x (m)','y (m)']
-		reconstruction_variables = sorted(set(variables.columns)-set(position_variables))
-		scalers = {}
-		for col in variables.columns:
-			scalers[col] = MinMaxScaler(copy=False)
-			scalers[col].fit(variables[[col]])
-			variables[f'{col} scaled'] = scalers[col].transform(variables[[col]])
-		
-		n_triggers_per_position = max(set(variables.index.get_level_values('n_trigger'))) + 1
-		training_data = variables.query(f'n_trigger < {int(n_triggers_per_position/2)}')
-		testing_data = variables.query(f'n_trigger >= {int(n_triggers_per_position/2)}')
-		
-		FEATURE_VARIABLES = ['f_amplitude_horizontal scaled','f_amplitude_vertical scaled']
-		
-		reconstructor = SVMReconstructor()
-		reconstructor.fit(
-			positions = training_data[['x (m)','y (m)']],
-			features = training_data[FEATURE_VARIABLES],
-		)
-		
-		reconstructed = reconstructor.reconstruct(testing_data[FEATURE_VARIABLES])
-		reconstructed.columns = [f'{_} reco' for _ in reconstructed.columns]
-		
-		reconstructed['reconstruction error (m)'] = sum([(reconstructed[f'{_} reco']-positions_data[_])**2 for _ in ['x (m)','y (m)']])**.5
-		
-		result = reconstructed.groupby('n_position').agg([numpy.nanmean,numpy.nanstd])
-		result.columns = [' '.join(_) for _ in result.columns]
-		
-		result = result.merge(positions_data[['x (m)','y (m)','n_x','n_y']], left_index=True, right_index=True)
-		
-		result = pandas.pivot_table(
-			data = result,
-			values = result.columns,
-			index = 'n_x',
-			columns = 'n_y',
-		)
-		
-		for col in {'reconstruction error (m) nanstd','reconstruction error (m) nanmean'}:
-			df = result[col]
-			df.set_index(pandas.Index(sorted(set(positions_data['x (m)']))[::-1]), inplace=True)
-			df = df.T.set_index(pandas.Index(sorted(set(positions_data['y (m)']))), 'y (m)').T
-			df.index.name = 'x (m)'
-			df.columns.name = 'y (m)'
-			df = df.T
-			fig = px.imshow(
-				df,
-				title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
-				aspect = 'equal',
-				labels = dict(
-					color = col,
-				),
-				origin = 'lower',
-				zmin = 0,
-				zmax = 55e-6 if 'nanstd' in col else None,
+	variables = variables.merge(positions_data[POSITION_VARIABLES_NAMES], left_index=True, right_index=True)
+	variables.dropna(inplace=True)
+	
+	n_triggers_per_position = max(set(variables.index.get_level_values('n_trigger'))) + 1
+	RECONSTRUCTORS_TO_TEST = [
+		dict(
+			reconstructor = SVMReconstructor(),
+			training_data = variables.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
+			testing_data = variables.query(f'n_trigger >= {int(n_triggers_per_position*1/3)}'),
+			features_variables_names = ['f_amplitude_horizontal','f_amplitude_vertical'],
+			reconstructor_name = 'SVR_reconstruction_test',
+		),
+	]
+	for stuff in RECONSTRUCTORS_TO_TEST:
+		with bureaucrat.handle_task(stuff['reconstructor_name']) as employee:
+			
+			training_data = stuff['training_data']
+			testing_data = stuff['testing_data']
+			
+			reconstructor = stuff['reconstructor']
+			reconstructor.fit(
+				positions = training_data[POSITION_VARIABLES_NAMES],
+				features = training_data[stuff['features_variables_names']],
 			)
-			fig.update_coloraxes(colorbar_title_side='right')
-			fig.write_html(
-				employee.path_to_directory_of_my_task/f'{col}.html',
-				include_plotlyjs = 'cdn',
-			)
-		
-		xx,yy = numpy.meshgrid(sorted(set(positions_data['x (m)'])), sorted(set(positions_data['y (m)'])))
-		fig, ax = plt.subplots()
-		ax.quiver(
-			xx.T*1e6,
-			yy.T*1e6,
-			numpy.flip((result['x (m)'] - result['x (m) reco nanmean']).to_numpy(), 0),
-			numpy.flip((result['y (m)'] - result['y (m) reco nanmean']).to_numpy(), 0),
-			scale_units = 'xy',
-		)
-		ax.set_aspect('equal')
-		ax.set_xlabel('x (µm)')
-		ax.set_ylabel('y (µm)')
-		for fmt in {'png','pdf'}:
-			plt.savefig(employee.path_to_directory_of_my_task/f'vector_plot.{fmt}')
-		
-		a
-		
+			reconstructed = reconstructor.reconstruct(testing_data[stuff['features_variables_names']])
+			
+			reconstructed.columns = [f'{_} reco' for _ in reconstructed.columns]
+			
+			reconstructed['reconstruction error (m)'] = sum([(reconstructed[f'{_} reco']-positions_data[_])**2 for _ in POSITION_VARIABLES_NAMES])**.5
+			
+			result = reconstructed.groupby('n_position').agg([numpy.nanmean,numpy.nanstd])
+			result.columns = [' '.join(_) for _ in result.columns]
+			
+			for col in stuff['features_variables_names']:
+				fig = utils.plot_as_xy_heatmap(
+					z = training_data.groupby('n_position').agg(numpy.nanmean)[col],
+					positions_data = positions_data,
+					title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
+					aspect = 'equal',
+					origin = 'lower',
+				)
+				path_for_plots = employee.path_to_directory_of_my_task/'features'
+				path_for_plots.mkdir(exist_ok=True)
+				fig.write_html(
+					path_for_plots/f'{col}.html',
+					include_plotlyjs = 'cdn',
+				)
+			
+			for col in {'reconstruction error (m) nanstd','reconstruction error (m) nanmean'}:
+				fig = utils.plot_as_xy_heatmap(
+					z = result[col],
+					positions_data = positions_data,
+					title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
+					aspect = 'equal',
+					origin = 'lower',
+					zmin = 0,
+					zmax = 55e-6 if 'nanstd' in col else None,
+				)
+				fig.write_html(
+					employee.path_to_directory_of_my_task/f'{col}.html',
+					include_plotlyjs = 'cdn',
+				)
+			
+			
+			# ~ z = result.copy()
+			# ~ z = z.merge(positions_data[['x (m)','y (m)','n_x','n_y']], left_index=True, right_index=True)
+			
+			# ~ z = pandas.pivot_table(
+				# ~ data = z,
+				# ~ values = z_name,
+				# ~ index = 'n_x',
+				# ~ columns = 'n_y',
+			# ~ )
+			# ~ z.set_index(
+				# ~ keys = pandas.Index(sorted(set(positions_data['x (m)']))[::-1]), 
+				# ~ inplace = True,
+			# ~ )
+			# ~ z = z.T
+			# ~ z.set_index(
+				# ~ pandas.Index(sorted(set(positions_data['y (m)']))),
+				# ~ inplace = True,
+			# ~ )
+			# ~ z = z.T
+			# ~ z.index.name = 'x (m)'
+			# ~ z.columns.name = 'y (m)'
+			# ~ z = z.T
+			# ~ xx,yy = numpy.meshgrid(sorted(set(positions_data['x (m)'])), sorted(set(positions_data['y (m)'])))
+			# ~ fig, ax = plt.subplots()
+			# ~ ax.quiver(
+				# ~ xx.T*1e6,
+				# ~ yy.T*1e6,
+				# ~ numpy.flip((z['x (m)'] - z['x (m) reco nanmean']).to_numpy(), 0),
+				# ~ numpy.flip((z['y (m)'] - z['y (m) reco nanmean']).to_numpy(), 0),
+				# ~ scale_units = 'xy',
+			# ~ )
+			# ~ ax.set_aspect('equal')
+			# ~ ax.set_xlabel('x (µm)')
+			# ~ ax.set_ylabel('y (µm)')
+			# ~ for fmt in {'png','pdf'}:
+				# ~ plt.savefig(employee.path_to_directory_of_my_task/f'vector_plot.{fmt}')
 
 if __name__ == '__main__':
 	import argparse
