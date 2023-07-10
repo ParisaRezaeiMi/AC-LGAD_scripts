@@ -219,42 +219,31 @@ def reconstruction_experiment(bureaucrat:RunBureaucrat):
 				)
 			
 			
-			# ~ z = result.copy()
-			# ~ z = z.merge(positions_data[['x (m)','y (m)','n_x','n_y']], left_index=True, right_index=True)
-			
-			# ~ z = pandas.pivot_table(
-				# ~ data = z,
-				# ~ values = z_name,
-				# ~ index = 'n_x',
-				# ~ columns = 'n_y',
-			# ~ )
-			# ~ z.set_index(
-				# ~ keys = pandas.Index(sorted(set(positions_data['x (m)']))[::-1]), 
-				# ~ inplace = True,
-			# ~ )
-			# ~ z = z.T
-			# ~ z.set_index(
-				# ~ pandas.Index(sorted(set(positions_data['y (m)']))),
-				# ~ inplace = True,
-			# ~ )
-			# ~ z = z.T
-			# ~ z.index.name = 'x (m)'
-			# ~ z.columns.name = 'y (m)'
-			# ~ z = z.T
-			# ~ xx,yy = numpy.meshgrid(sorted(set(positions_data['x (m)'])), sorted(set(positions_data['y (m)'])))
-			# ~ fig, ax = plt.subplots()
-			# ~ ax.quiver(
-				# ~ xx.T*1e6,
-				# ~ yy.T*1e6,
-				# ~ numpy.flip((z['x (m)'] - z['x (m) reco nanmean']).to_numpy(), 0),
-				# ~ numpy.flip((z['y (m)'] - z['y (m) reco nanmean']).to_numpy(), 0),
-				# ~ scale_units = 'xy',
-			# ~ )
-			# ~ ax.set_aspect('equal')
-			# ~ ax.set_xlabel('x (µm)')
-			# ~ ax.set_ylabel('y (µm)')
-			# ~ for fmt in {'png','pdf'}:
-				# ~ plt.savefig(employee.path_to_directory_of_my_task/f'vector_plot.{fmt}')
+			z = result.copy()
+			z = z.merge(positions_data[['x (m)','y (m)','n_x','n_y']], left_index=True, right_index=True)
+			z = pandas.pivot_table(
+				data = z,
+				values = z.columns,
+				index = 'n_x',
+				columns = 'n_y',
+			)
+			xx,yy = numpy.meshgrid(sorted(set(positions_data['x (m)'])), sorted(set(positions_data['y (m)'])))
+			fig, ax = plt.subplots()
+			ax.quiver(
+				xx.T*1e6,
+				yy.T*1e6,
+				numpy.flip((z['x (m)'] - z['x (m) reco nanmean']).to_numpy(), 0),
+				numpy.flip((z['y (m)'] - z['y (m) reco nanmean']).to_numpy(), 0),
+				angles = 'xy', 
+				scale_units = 'xy', 
+				scale = 1e-6,
+			)
+			ax.set_aspect('equal')
+			ax.set_xlabel('x (µm)')
+			ax.set_ylabel('y (µm)')
+			plt.title(f'Reconstruction bias plot\n{bureaucrat.run_name}')
+			for fmt in {'png','pdf'}:
+				plt.savefig(employee.path_to_directory_of_my_task/f'vector_plot.{fmt}')
 
 if __name__ == '__main__':
 	import argparse
