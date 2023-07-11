@@ -10,6 +10,11 @@ import numpy
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.svm import SVR
 import utils
+import torch
+from torch import nn
+from torch.utils.data import DataLoader
+from torchvision.transforms import ToTensor
+from torch.utils.data import Dataset
 
 class RSDReconstructor:
 	def fit(self, positions, features):
@@ -74,7 +79,7 @@ class SVMReconstructor(RSDReconstructor):
 		
 		self._svrs = {}
 		for col in scaled_positions.columns:
-			self._svrs[col] = SVR(kernel='rbf', C=1, epsilon=.1)
+			self._svrs[col] = SVR(kernel='rbf', C=100, epsilon=.1)
 			self._svrs[col].fit(
 				X = scaled_features,
 				y = scaled_positions[col],
@@ -93,12 +98,181 @@ class SVMReconstructor(RSDReconstructor):
 			reconstructed[col] = self.scalers[col].inverse_transform(reconstructed[[col]])
 		return reconstructed
 
-class ChargeImbalanceReconstructor(RSDReconstructor):
-	def __init__(self, pads_arrangement):
-		self.pads_arrangement = pads_arrangement
+class DNNReconstructor(RSDReconstructor):
+	class RSDDataLoader(Dataset):
+		def __init__(self, positions:pandas.DataFrame, features:pandas.DataFrame, transform=None, target_transform=None, batch_size:int=1, shuffle:bool=False):
+			df = pandas.concat([positions,features], axis=1)
+			if shuffle == True:
+				df = df.sample(frac=1)
+			
+			self.positions = torch.tensor(df[positions.columns].values).to(torch.float32)
+			self.features = torch.tensor(df[features.columns].values).to(torch.float32)
+			
+			self.transform = transform
+			self.target_transform = target_transform
+			
+			self.batch_size = batch_size
+
+		def __len__(self):
+			return -(len(self.positions)//-self.batch_size)
+		
+		def __getitem__(self, idx):
+			bs = self.batch_size
+			if (idx+1)*bs < len(self.positions):
+				position = self.positions[idx*bs:(idx+1)*bs,:]
+				features = self.features[idx*bs:(idx+1)*bs,:]
+			elif idx*bs < len(self.positions):
+				position = self.positions[idx*bs:,:]
+				features = self.features[idx*bs:,:]
+			else:
+				raise StopIteration()
+			if self.transform:
+				position = self.transform(position)
+			if self.target_transform:
+				features = self.target_transform(features)
+			return features, position
+	
+	def __init__(self):
+		class NeuralNetwork(nn.Module):
+			def __init__(self):
+				super().__init__()
+				self.flatten = nn.Flatten()
+				self.linear_relu_stack = nn.Sequential(
+					nn.Linear(4, 11),
+					nn.ReLU(),
+					nn.Linear(11, 11),
+					nn.ReLU(),
+					nn.Linear(11, 11),
+					nn.ReLU(),
+					nn.Linear(11, 2)
+				)
+
+			def forward(self, x):
+				x = self.flatten(x)
+				logits = self.linear_relu_stack(x)
+				return logits
+		
+		device = (
+			"cuda"
+			if torch.cuda.is_available()
+			else "mps"
+			if torch.backends.mps.is_available()
+			else "cpu"
+		)
+		self.device = device
+		
+		self.dnn = NeuralNetwork().to(device)
 		
 	def fit(self, positions, features):
+		def train(dataloader, model, loss_fn, optimizer):
+			model.train()
+			for batch, (X, y) in enumerate(dataloader):
+				X, y = X.to(self.device), y.to(self.device)
+				
+				# Compute prediction error
+				pred = model(X)
+				loss = loss_fn(pred, y)
+
+				# Backpropagation
+				loss.backward()
+				optimizer.step()
+				optimizer.zero_grad()
+				
+				# ~ print(f"loss: {loss.item():>7f}  [batch: {batch}/{len(dataloader)-1}]")
+		
+		super().fit(positions=positions, features=features) # Performs some data curation and general stuff common to any machine learning method.
+		
+		# Scale between 0 and 1:
+		scaled_positions = positions.copy()
+		for col in scaled_positions.columns:
+			scaled_positions[col] = self.scalers[col].transform(scaled_positions[[col]])
+		scaled_features = features.copy()
+		for feature in scaled_features.columns:
+			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
+		
+		for t in range(555):
+			print(f'EPOCH {t}')
+			train(
+				dataloader = self.RSDDataLoader(
+					positions = scaled_positions,
+					features = scaled_features,
+					batch_size = int(len(scaled_positions)/11),
+					shuffle = True,
+				),
+				model = self.dnn, 
+				loss_fn = nn.CrossEntropyLoss(),
+				optimizer = torch.optim.SGD(self.dnn.parameters(), lr=1e-3),
+			)
+	
+	def reconstruct(self, features):
+		super().reconstruct(features=features)
+		
+		def predict(dataloader, model, loss_fn):
+			print(f'Testing...')
+			
+			return prediction
+		
+		# Scale between 0 and 1:
+		scaled_features = features.copy()
+		for feature in scaled_features.columns:
+			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
+		
+		dataloader = self.RSDDataLoader(
+			positions = pandas.DataFrame(index=features.index, data=numpy.zeros((len(features),len(self._positions_columns))), columns=self._positions_columns), # Create fake data just because this requires it, but it will not be used...
+			features = scaled_features,
+			batch_size = len(features),
+		)
+		self.dnn.eval()
+		with torch.no_grad():
+			for X, y in dataloader:
+				X = X.to(self.device)
+				prediction = self.dnn(X)
+		
+		reconstructed = pandas.DataFrame(
+			index = features.index,
+			data = prediction.numpy(),
+			columns = self._positions_columns,
+		)
+		for col in reconstructed:
+			reconstructed[col] = self.scalers[col].inverse_transform(reconstructed[[col]])
+		
+		return reconstructed
+
+class LookupTableReconstructor(RSDReconstructor):
+	def fit(self, positions, features):
 		super().fit(positions=positions, features=features) # Performs some data curation and general stuff common to any method.
+		
+		scaled_features = features.copy()
+		for feature in scaled_features.columns:
+			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
+		
+		self.lookup_table_of_scaled_features = scaled_features.groupby('n_position').agg(numpy.nanmean)
+		self.lookup_table_of_positions = positions.groupby('n_position').agg(numpy.nanmean)
+		
+	def reconstruct(self, features):
+		super().reconstruct(features=features)
+		
+		scaled_features = features.copy()
+		for feature in scaled_features.columns:
+			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
+		
+		distances = []
+		for feature in self._features_columns:
+			_ = numpy.subtract.outer(
+				scaled_features[feature].to_numpy(),
+				self.lookup_table_of_scaled_features[feature].to_numpy(),
+			)
+			_ **= 2
+			distances.append(_)
+		distances = sum(distances)
+		idx_reconstructed = numpy.argmin(distances, axis=1)
+		
+		reconstructed_positions = pandas.DataFrame(
+			data = self.lookup_table_of_positions.iloc[idx_reconstructed].to_numpy(),
+			index = features.index,
+			columns = self._positions_columns,
+		)
+		return reconstructed_positions
 
 def reconstruction_experiment(bureaucrat:RunBureaucrat):
 	bureaucrat.check_these_tasks_were_run_successfully('TCT_2D_scan')
@@ -156,30 +330,59 @@ def reconstruction_experiment(bureaucrat:RunBureaucrat):
 	data = data.stack('n_channel') # Revert what I have done before.
 
 	variables = variables.merge(positions_data[POSITION_VARIABLES_NAMES], left_index=True, right_index=True)
-	variables.dropna(inplace=True)
+	
+	amplitude_data = data[['Amplitude (V)']].unstack('n_channel')
+	amplitude_data.columns = [' '.join([str(__) for __ in _]) for _ in amplitude_data.columns]
+	amplitude_data = amplitude_data.merge(positions_data[POSITION_VARIABLES_NAMES], left_index=True, right_index=True)
 	
 	n_triggers_per_position = max(set(variables.index.get_level_values('n_trigger'))) + 1
 	RECONSTRUCTORS_TO_TEST = [
+		# ~ dict(
+			# ~ reconstructor = SVMReconstructor(),
+			# ~ training_data = variables.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
+			# ~ testing_data = variables.query(f'n_trigger >= {int(n_triggers_per_position*1/3)}'),
+			# ~ features_variables_names = ['f_amplitude_horizontal','f_amplitude_vertical'],
+			# ~ reconstructor_name = 'SVR_reconstruction_test',
+		# ~ ),
+		# ~ dict(
+			# ~ reconstructor = SVMReconstructor(),
+			# ~ training_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
+			# ~ testing_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
+			# ~ features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
+			# ~ reconstructor_name = 'SVR_reconstruction_with_amplitudes',
+		# ~ ),
+		# ~ dict(
+			# ~ reconstructor = DNNReconstructor(),
+			# ~ training_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
+			# ~ testing_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
+			# ~ features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
+			# ~ reconstructor_name = 'DNN_reconstruction_with_amplitudes',
+		# ~ ),
 		dict(
-			reconstructor = SVMReconstructor(),
-			training_data = variables.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
-			testing_data = variables.query(f'n_trigger >= {int(n_triggers_per_position*1/3)}'),
-			features_variables_names = ['f_amplitude_horizontal','f_amplitude_vertical'],
-			reconstructor_name = 'SVR_reconstruction_test',
+			reconstructor = LookupTableReconstructor(),
+			training_data = amplitude_data,
+			testing_data = amplitude_data.query(f'n_trigger < 7'),
+			features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
+			reconstructor_name = 'lookup_table_reconstruction_with_amplitudes',
 		),
 	]
 	for stuff in RECONSTRUCTORS_TO_TEST:
+		print(f'{repr(stuff["reconstructor_name"])}...')
 		with bureaucrat.handle_task(stuff['reconstructor_name']) as employee:
 			
-			training_data = stuff['training_data']
-			testing_data = stuff['testing_data']
+			training_data = stuff['training_data'].dropna()
+			testing_data = stuff['testing_data'].dropna()
 			
 			reconstructor = stuff['reconstructor']
+			print(f'Training...')
 			reconstructor.fit(
 				positions = training_data[POSITION_VARIABLES_NAMES],
 				features = training_data[stuff['features_variables_names']],
 			)
+			print(f'Reconstructing...')
 			reconstructed = reconstructor.reconstruct(testing_data[stuff['features_variables_names']])
+			
+			print('Analyzing and plotting...')
 			
 			reconstructed.columns = [f'{_} reco' for _ in reconstructed.columns]
 			
@@ -204,14 +407,14 @@ def reconstruction_experiment(bureaucrat:RunBureaucrat):
 				)
 			
 			for col in {'reconstruction error (m) nanstd','reconstruction error (m) nanmean'}:
-				fig = utils.plot_as_xy_heatmap(
+				fig = utils.plot_as_xy_contour(
 					z = result[col],
 					positions_data = positions_data,
 					title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
-					aspect = 'equal',
-					origin = 'lower',
-					zmin = 0,
-					zmax = 55e-6 if 'nanstd' in col else None,
+					# ~ aspect = 'equal',
+					# ~ origin = 'lower',
+					# ~ zmin = 0,
+					# ~ zmax = 33e-6 if 'nanstd' in col else 33e-6 if 'nanmean' in col else None,
 				)
 				fig.write_html(
 					employee.path_to_directory_of_my_task/f'{col}.html',
@@ -244,6 +447,8 @@ def reconstruction_experiment(bureaucrat:RunBureaucrat):
 			plt.title(f'Reconstruction bias plot\n{bureaucrat.run_name}')
 			for fmt in {'png','pdf'}:
 				plt.savefig(employee.path_to_directory_of_my_task/f'vector_plot.{fmt}')
+		
+		print(f'Finished {repr(stuff["reconstructor_name"])}.')
 
 if __name__ == '__main__':
 	import argparse

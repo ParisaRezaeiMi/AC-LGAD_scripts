@@ -1,6 +1,7 @@
 from pathlib import Path
 import pandas
 import plotly.express as px
+import plotly.graph_objects as go
 
 def save_dataframe(df, name:str, location:Path):
 	for extension,method in {'pickle':df.to_pickle,'csv':df.to_csv}.items():
@@ -88,4 +89,64 @@ def plot_as_xy_heatmap(z:pandas.Series, positions_data:pandas.DataFrame, **plotl
 		**plotly_kwargs,
 	)
 	fig.update_coloraxes(colorbar_title_side='right')
+	return fig
+
+def plot_as_xy_contour(z:pandas.Series, positions_data:pandas.DataFrame, **plotly_kwargs):
+	if not isinstance(z, pandas.Series):
+		raise TypeError(f'`z` must be an instance of {pandas.Series}, but received instead an object of type {type(z)}. ')
+	
+	z_name = z.name
+	z = z.to_frame()
+	z = z.merge(positions_data[['x (m)','y (m)','n_x','n_y']], left_index=True, right_index=True)
+	
+	z = pandas.pivot_table(
+		data = z,
+		values = z_name,
+		index = 'n_x',
+		columns = 'n_y',
+	)
+	z.set_index(
+		keys = pandas.Index(sorted(set(positions_data['x (m)']))[::-1]), 
+		inplace = True,
+	)
+	z = z.T
+	z.set_index(
+		pandas.Index(sorted(set(positions_data['y (m)']))),
+		inplace = True,
+	)
+	z = z.T
+	z.index.name = 'x (m)'
+	z.columns.name = 'y (m)'
+	z = z.T
+	fig = go.Figure(
+		data = go.Contour(
+			z = z,
+			x = z.columns,
+			y = z.index,
+			contours = dict(
+				# ~ coloring ='heatmap',
+				showlabels = True,
+				labelfont = dict( # label font properties
+						size = 12,
+						color = 'white',
+				),
+				start = 0,
+				end = 50e-6,
+				size = 2.5e-6,
+			),
+			line_smoothing = 1,
+			colorbar = dict(
+				title = z_name,
+				titleside = 'right',
+			),
+		),
+	)
+	fig.update_layout(
+		xaxis_title = z.columns.name,
+		yaxis = dict(
+			scaleanchor = 'x',
+			title = z.index.name,
+		),
+		**plotly_kwargs,
+	)
 	return fig
