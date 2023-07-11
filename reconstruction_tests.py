@@ -391,6 +391,7 @@ def reconstruction_experiment(bureaucrat:RunBureaucrat):
 			result = reconstructed.groupby('n_position').agg([numpy.nanmean,numpy.nanstd])
 			result.columns = [' '.join(_) for _ in result.columns]
 			
+			path_for_plots = employee.path_to_directory_of_my_task/'features'
 			for col in stuff['features_variables_names']:
 				fig = utils.plot_as_xy_heatmap(
 					z = training_data.groupby('n_position').agg(numpy.nanmean)[col],
@@ -399,25 +400,46 @@ def reconstruction_experiment(bureaucrat:RunBureaucrat):
 					aspect = 'equal',
 					origin = 'lower',
 				)
-				path_for_plots = employee.path_to_directory_of_my_task/'features'
 				path_for_plots.mkdir(exist_ok=True)
 				fig.write_html(
-					path_for_plots/f'{col}.html',
+					path_for_plots/f'{col}_heatmap.html',
+					include_plotlyjs = 'cdn',
+				)
+				fig = utils.plot_as_xy_contour(
+					z = training_data.groupby('n_position').agg(numpy.nanmean)[col],
+					positions_data = positions_data,
+				)
+				fig.update_layout(
+					title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
+				)
+				fig.write_html(
+					path_for_plots/f'{col}_contour.html',
 					include_plotlyjs = 'cdn',
 				)
 			
 			for col in {'reconstruction error (m) nanstd','reconstruction error (m) nanmean'}:
-				fig = utils.plot_as_xy_contour(
+				fig = utils.plot_as_xy_heatmap(
 					z = result[col],
 					positions_data = positions_data,
 					title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
-					# ~ aspect = 'equal',
-					# ~ origin = 'lower',
-					# ~ zmin = 0,
-					# ~ zmax = 33e-6 if 'nanstd' in col else 33e-6 if 'nanmean' in col else None,
+					aspect = 'equal',
+					origin = 'lower',
+					zmin = 0,
+					zmax = 33e-6 if 'nanstd' in col else 33e-6 if 'nanmean' in col else None,
 				)
 				fig.write_html(
-					employee.path_to_directory_of_my_task/f'{col}.html',
+					employee.path_to_directory_of_my_task/f'{col}_heatmap.html',
+					include_plotlyjs = 'cdn',
+				)
+				fig = utils.plot_as_xy_contour(
+					z = result[col],
+					positions_data = positions_data,
+				)
+				fig.update_layout(
+					title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
+				)
+				fig.write_html(
+					employee.path_to_directory_of_my_task/f'{col}_contour.html',
 					include_plotlyjs = 'cdn',
 				)
 			

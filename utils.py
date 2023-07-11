@@ -2,6 +2,30 @@ from pathlib import Path
 import pandas
 import plotly.express as px
 import plotly.graph_objects as go
+import numpy
+import scipy.ndimage as ndimage
+
+def filter_nan_gaussian_david(arr, sigma):
+	# https://stackoverflow.com/a/61481246/8849755
+    """Allows intensity to leak into the nan area.
+    According to Davids answer:
+        https://stackoverflow.com/a/36307291/7128154
+    """
+    gauss = arr.copy()
+    gauss[numpy.isnan(gauss)] = 0
+    gauss = ndimage.gaussian_filter(
+            gauss, sigma=sigma, mode='constant', cval=0)
+
+    norm = numpy.ones(shape=arr.shape)
+    norm[numpy.isnan(arr)] = 0
+    norm = ndimage.gaussian_filter(
+            norm, sigma=sigma, mode='constant', cval=0)
+
+    # avoid RuntimeWarning: invalid value encountered in true_divide
+    norm = numpy.where(norm==0, 1, norm)
+    gauss = gauss/norm
+    gauss[numpy.isnan(arr)] = numpy.nan
+    return gauss
 
 def save_dataframe(df, name:str, location:Path):
 	for extension,method in {'pickle':df.to_pickle,'csv':df.to_csv}.items():
@@ -91,7 +115,7 @@ def plot_as_xy_heatmap(z:pandas.Series, positions_data:pandas.DataFrame, **plotl
 	fig.update_coloraxes(colorbar_title_side='right')
 	return fig
 
-def plot_as_xy_contour(z:pandas.Series, positions_data:pandas.DataFrame, **plotly_kwargs):
+def plot_as_xy_contour(z:pandas.Series, positions_data:pandas.DataFrame):
 	if not isinstance(z, pandas.Series):
 		raise TypeError(f'`z` must be an instance of {pandas.Series}, but received instead an object of type {type(z)}. ')
 	
@@ -120,7 +144,7 @@ def plot_as_xy_contour(z:pandas.Series, positions_data:pandas.DataFrame, **plotl
 	z = z.T
 	fig = go.Figure(
 		data = go.Contour(
-			z = z,
+			z = filter_nan_gaussian_david(z, sigma=2),
 			x = z.columns,
 			y = z.index,
 			contours = dict(
@@ -147,6 +171,5 @@ def plot_as_xy_contour(z:pandas.Series, positions_data:pandas.DataFrame, **plotl
 			scaleanchor = 'x',
 			title = z.index.name,
 		),
-		**plotly_kwargs,
 	)
 	return fig
