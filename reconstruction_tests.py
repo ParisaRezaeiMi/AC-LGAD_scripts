@@ -15,6 +15,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torchvision.transforms import ToTensor
 from torch.utils.data import Dataset
+from scipy.stats import gaussian_kde
 
 class RSDReconstructor:
 	def fit(self, positions, features):
@@ -274,6 +275,52 @@ class LookupTableReconstructor(RSDReconstructor):
 		)
 		return reconstructed_positions
 
+class DiscreteMLEReconstructor(RSDReconstructor):
+	def fit(self, positions, features):
+		super().fit(positions=positions, features=features) # Performs some data curation and general stuff common to any method.
+		
+		scaled_features = features.copy()
+		for feature in scaled_features.columns:
+			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
+		
+		KDEs = []
+		n_positions = []
+		for n_position, this_position__scaled_features in scaled_features.groupby('n_position'):
+			this_position_KDE = gaussian_kde(this_position__scaled_features.values.transpose())
+			KDEs.append(this_position_KDE)
+			n_positions.append(n_position)
+		self.scaled_features_KDEs = pandas.Series(
+			data = KDEs,
+			index = pandas.Index(
+				data = n_positions,
+				name = 'n_position',
+			),
+			name = 'scaled_features_KDEs',
+		)
+		
+		self.lookup_table_of_positions = positions.groupby('n_position').agg(numpy.nanmean)
+	
+	def reconstruct(self, features):
+		super().reconstruct(features=features)
+		
+		scaled_features = features.copy()
+		for feature in scaled_features.columns:
+			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
+		
+		likelihoods = []
+		n_positions = []
+		for n_position, KDE in self.scaled_features_KDEs.items():
+			likelihood = KDE(scaled_features.values.transpose())
+			likelihoods.append(likelihood)
+			n_positions.append(n_position)
+		likelihoods = numpy.array(likelihoods)
+		n_positions = numpy.array(n_positions)
+		most_likely_n_position = numpy.argmax(likelihoods, axis=0)
+		reconstructed_positions = self.lookup_table_of_positions.loc[most_likely_n_position]
+		reconstructed_positions.index = features.index
+		
+		return reconstructed_positions
+
 def reconstruction_experiment(bureaucrat:RunBureaucrat):
 	bureaucrat.check_these_tasks_were_run_successfully('TCT_2D_scan')
 	
@@ -364,6 +411,13 @@ def reconstruction_experiment(bureaucrat:RunBureaucrat):
 			testing_data = amplitude_data.query(f'n_trigger < 7'),
 			features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
 			reconstructor_name = 'lookup_table_reconstruction_with_amplitudes',
+		),
+		dict(
+			reconstructor = DiscreteMLEReconstructor(),
+			training_data = amplitude_data,
+			testing_data = amplitude_data.query(f'n_trigger < 7'),
+			features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
+			reconstructor_name = 'discrete_MLE_reconstruction_with_amplitudes',
 		),
 	]
 	for stuff in RECONSTRUCTORS_TO_TEST:
