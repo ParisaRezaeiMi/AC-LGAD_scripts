@@ -243,6 +243,18 @@ class LookupTableReconstructor(RSDReconstructor):
 		self.lookup_table_of_positions = positions.groupby('n_position').agg(numpy.nanmean)
 		
 	def reconstruct(self, features, batch_size:int=None):
+		"""
+		Arguments
+		---------
+		features: pandas.DataFrame
+			See description of `RSDReconstructor`.
+		batch_size: int, default `None`
+			When `features` is very large, it can cause the computer to
+			run out of memory when performing the reconstruction. The
+			`features` data frame can be split in smaller batches, each
+			with a number of events (rows) given by `batch_size`. If `batch_size`
+			is `None` then no splitting is performed.
+		"""
 		super().reconstruct(features=features)
 		
 		scaled_features = features.copy()
@@ -307,6 +319,18 @@ class DiscreteMLEReconstructor(RSDReconstructor):
 		self.lookup_table_of_positions = positions.groupby('n_position').agg(numpy.nanmean)
 	
 	def reconstruct(self, features, batch_size:int=None):
+		"""
+		Arguments
+		---------
+		features: pandas.DataFrame
+			See description of `RSDReconstructor`.
+		batch_size: int, default `None`
+			When `features` is very large, it can cause the computer to
+			run out of memory when performing the reconstruction. The
+			`features` data frame can be split in smaller batches, each
+			with a number of events (rows) given by `batch_size`. If `batch_size`
+			is `None` then no splitting is performed.
+		"""
 		super().reconstruct(features=features)
 		
 		scaled_features = features.copy()
