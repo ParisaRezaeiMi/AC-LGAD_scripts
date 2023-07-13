@@ -444,34 +444,20 @@ def reconstruction_experiment(bureaucrat:RunBureaucrat):
 			
 			result = reconstructed.groupby('n_position').agg([numpy.nanmean,numpy.nanstd])
 			result.columns = [' '.join(_) for _ in result.columns]
+			result.rename(
+				columns = {
+					'reconstruction error (m) nanstd': 'Reconstruction uncertainty (m)',
+					'reconstruction error (m) nanmean': 'Reconstruction bias (m)',
+				},
+				inplace = True,
+			)
 			
-			path_for_plots = employee.path_to_directory_of_my_task/'features'
-			for col in stuff['features_variables_names']:
-				fig = utils.plot_as_xy_heatmap(
-					z = training_data.groupby('n_position').agg(numpy.nanmean)[col],
-					positions_data = positions_data,
-					title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
-					aspect = 'equal',
-					origin = 'lower',
-				)
-				path_for_plots.mkdir(exist_ok=True)
-				fig.write_html(
-					path_for_plots/f'{col}_heatmap.html',
-					include_plotlyjs = 'cdn',
-				)
-				fig = utils.plot_as_xy_contour(
-					z = training_data.groupby('n_position').agg(numpy.nanmean)[col],
-					positions_data = positions_data,
-				)
-				fig.update_layout(
-					title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
-				)
-				fig.write_html(
-					path_for_plots/f'{col}_contour.html',
-					include_plotlyjs = 'cdn',
-				)
+			x_grid_size = numpy.absolute(numpy.diff(positions_data['x (m)'])).mean()
+			y_grid_size = numpy.absolute(numpy.diff(positions_data['y (m)'])).mean()
+			xy_grid_sampling_contribution_to_the_uncertainty = x_grid_size/12**.5 + y_grid_size/12**.5
+			result['Reconstruction uncertainty (m)'] = (result['Reconstruction uncertainty (m)']**2 + xy_grid_sampling_contribution_to_the_uncertainty**2)**.5
 			
-			for col in {'reconstruction error (m) nanstd','reconstruction error (m) nanmean'}:
+			for col in ['Reconstruction uncertainty (m)','Reconstruction bias (m)']:
 				fig = utils.plot_as_xy_heatmap(
 					z = result[col],
 					positions_data = positions_data,
@@ -523,7 +509,32 @@ def reconstruction_experiment(bureaucrat:RunBureaucrat):
 			plt.title(f'Reconstruction bias plot\n{bureaucrat.run_name}')
 			for fmt in {'png','pdf'}:
 				plt.savefig(employee.path_to_directory_of_my_task/f'vector_plot.{fmt}')
-		
+			
+			path_for_plots = employee.path_to_directory_of_my_task/'features'
+			for col in stuff['features_variables_names']:
+				fig = utils.plot_as_xy_heatmap(
+					z = training_data.groupby('n_position').agg(numpy.nanmean)[col],
+					positions_data = positions_data,
+					title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
+					aspect = 'equal',
+					origin = 'lower',
+				)
+				path_for_plots.mkdir(exist_ok=True)
+				fig.write_html(
+					path_for_plots/f'{col}_heatmap.html',
+					include_plotlyjs = 'cdn',
+				)
+				fig = utils.plot_as_xy_contour(
+					z = training_data.groupby('n_position').agg(numpy.nanmean)[col],
+					positions_data = positions_data,
+				)
+				fig.update_layout(
+					title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
+				)
+				fig.write_html(
+					path_for_plots/f'{col}_contour.html',
+					include_plotlyjs = 'cdn',
+				)
 		print(f'Finished {repr(stuff["reconstructor_name"])}.')
 
 if __name__ == '__main__':
