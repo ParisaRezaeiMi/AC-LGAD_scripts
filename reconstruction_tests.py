@@ -286,8 +286,8 @@ class DiscreteMLEReconstructor(RSDReconstructor):
 		
 		KDEs = []
 		n_positions = []
-		for n_position, this_position__scaled_features in scaled_features.groupby('n_position'):
-			this_position_KDE = gaussian_kde(this_position__scaled_features.values.transpose())
+		for n_position, this_position_scaled_features in scaled_features.groupby('n_position'):
+			this_position_KDE = gaussian_kde(this_position_scaled_features.values.transpose())
 			KDEs.append(this_position_KDE)
 			n_positions.append(n_position)
 		self.scaled_features_KDEs = pandas.Series(
