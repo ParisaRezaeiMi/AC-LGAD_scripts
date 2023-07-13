@@ -155,8 +155,8 @@ def plot_as_xy_contour(z:pandas.Series, positions_data:pandas.DataFrame):
 						color = 'white',
 				),
 				start = 0,
-				end = 50e-6,
-				size = 2.5e-6,
+				# ~ end = 50e-6,
+				# ~ size = 2.5e-6,
 			),
 			line_smoothing = 1,
 			colorbar = dict(
