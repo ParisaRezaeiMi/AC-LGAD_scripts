@@ -104,30 +104,42 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 		dict(
 			reconstructor = reconstructors.LookupTableReconstructor(),
 			training_data = amplitude_data,
-			testing_data = amplitude_data.query(f'n_trigger < 44'),
+			testing_data = amplitude_data,
 			features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
 			reconstructor_name = 'lookup_table_reconstructor_with_amplitudes',
+			reconstructor_reconstruct_kwargs = dict(
+				batch_size = 11111,
+			),
 		),
 		dict(
 			reconstructor = reconstructors.DiscreteMLEReconstructor(),
 			training_data = amplitude_data,
-			testing_data = amplitude_data.query(f'n_trigger < 44'),
+			testing_data = amplitude_data,
 			features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
 			reconstructor_name = 'discrete_MLE_reconstructor_with_amplitudes',
+			reconstructor_reconstruct_kwargs = dict(
+				batch_size = 11111,
+			),
 		),
 		dict(
 			reconstructor = reconstructors.LookupTableReconstructor(),
 			training_data = amplitude_share_data,
-			testing_data = amplitude_share_data.query(f'n_trigger < 22'),
+			testing_data = amplitude_share_data,
 			features_variables_names = [f'Amplitude shared fraction {_}' for _ in [1,2,3,4]],
 			reconstructor_name = 'lookup_table_reconstructor_with_amplitudes_fraction',
+			reconstructor_reconstruct_kwargs = dict(
+				batch_size = 11111,
+			),
 		),
 		dict(
 			reconstructor = reconstructors.DiscreteMLEReconstructor(),
 			training_data = amplitude_share_data_for_discrete_MLE_algorithm,
-			testing_data = amplitude_share_data_for_discrete_MLE_algorithm.query(f'n_trigger < 22'),
+			testing_data = amplitude_share_data_for_discrete_MLE_algorithm,
 			features_variables_names = [f'Amplitude shared fraction {_}' for _ in [1,2,3,4]],
 			reconstructor_name = 'discrete_MLE_reconstructor_with_amplitudes_fraction',
+			reconstructor_reconstruct_kwargs = dict(
+				batch_size = 11111,
+			),
 		),
 	]
 	for stuff in RECONSTRUCTORS_TO_TEST:
@@ -172,7 +184,7 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 			with open(employee.path_to_directory_of_my_task/'reconstructor.pickle', 'wb') as ofile:
 				pickle.dump(reconstructor, ofile, pickle.HIGHEST_PROTOCOL)
 			print(f'Reconstructing...')
-			reconstructed = reconstructor.reconstruct(testing_data[stuff['features_variables_names']])
+			reconstructed = reconstructor.reconstruct(testing_data[stuff['features_variables_names']], **stuff['reconstructor_reconstruct_kwargs'])
 			
 			print('Analyzing and plotting...')
 			

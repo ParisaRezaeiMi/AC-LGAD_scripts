@@ -35,8 +35,8 @@ class RSDReconstructor:
 		for feature in features.columns:
 			self.scalers[feature].fit(features[[feature]])
 		
-		self._positions_columns = positions.columns
-		self._features_columns = features.columns
+		self.positions_names = positions.columns
+		self.features_names = features.columns
 		
 	def reconstruct(self, features):
 		"""Perform a reconstruction of positions given the observed features.
@@ -56,8 +56,8 @@ class RSDReconstructor:
 		for k,i in {'features':features}.items():
 			if not isinstance(i, pandas.DataFrame):
 				raise TypeError(f'`{k}` must be an instance of pandas data frame, but received object of type {type(i)}. ')
-		if set(features.columns) != set(self._features_columns):
-			raise ValueError(f'`features` columns do not match the ones used during the fitting. During the fitting process I received {sorted(set(self._features_columns))} and now for reconstruction I am receiving {sorted(set(features.columns))}. ')
+		if set(features.columns) != set(self.features_names):
+			raise ValueError(f'`features` columns do not match the ones used during the fitting. During the fitting process I received {sorted(set(self.features_names))} and now for reconstruction I am receiving {sorted(set(features.columns))}. ')
 
 class SVMReconstructor(RSDReconstructor):
 	def fit(self, positions, features):
@@ -86,7 +86,7 @@ class SVMReconstructor(RSDReconstructor):
 			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
 		
 		reconstructed = pandas.DataFrame(index=features.index)
-		for col in self._positions_columns:
+		for col in self.positions_names:
 			reconstructed[col] = self._svrs[col].predict(X = scaled_features)
 			reconstructed[col] = self.scalers[col].inverse_transform(reconstructed[[col]])
 		return reconstructed
@@ -211,7 +211,7 @@ class DNNReconstructor(RSDReconstructor):
 			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
 		
 		dataloader = self.RSDDataLoader(
-			positions = pandas.DataFrame(index=features.index, data=numpy.zeros((len(features),len(self._positions_columns))), columns=self._positions_columns), # Create fake data just because this requires it, but it will not be used...
+			positions = pandas.DataFrame(index=features.index, data=numpy.zeros((len(features),len(self.positions_names))), columns=self.positions_names), # Create fake data just because this requires it, but it will not be used...
 			features = scaled_features,
 			batch_size = len(features),
 		)
@@ -224,7 +224,7 @@ class DNNReconstructor(RSDReconstructor):
 		reconstructed = pandas.DataFrame(
 			index = features.index,
 			data = prediction.numpy(),
-			columns = self._positions_columns,
+			columns = self.positions_names,
 		)
 		for col in reconstructed:
 			reconstructed[col] = self.scalers[col].inverse_transform(reconstructed[[col]])
@@ -242,15 +242,29 @@ class LookupTableReconstructor(RSDReconstructor):
 		self.lookup_table_of_scaled_features = scaled_features.groupby('n_position').agg(numpy.nanmean)
 		self.lookup_table_of_positions = positions.groupby('n_position').agg(numpy.nanmean)
 		
-	def reconstruct(self, features):
+	def reconstruct(self, features, batch_size:int=None):
 		super().reconstruct(features=features)
 		
 		scaled_features = features.copy()
 		for feature in scaled_features.columns:
 			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
 		
+		if batch_size is None or len(features)<batch_size:
+			reconstructed_positions = self._reconstruct_using_scaled_features(scaled_features)
+		else:
+			reconstructed_positions = []
+			for scaled_features_batch in numpy.array_split(scaled_features, int(len(scaled_features)/batch_size)):
+				_ = self._reconstruct_using_scaled_features(scaled_features_batch)
+				reconstructed_positions.append(_)
+			reconstructed_positions = pandas.concat(reconstructed_positions)
+		
+		return reconstructed_positions
+	
+	def _reconstruct_using_scaled_features(self, scaled_features):
+		"""Performs the actual reconstruction process using the scaled
+		features. Returns the reconstructed positions."""
 		distances = []
-		for feature in self._features_columns:
+		for feature in self.features_names:
 			_ = numpy.subtract.outer(
 				scaled_features[feature].to_numpy(),
 				self.lookup_table_of_scaled_features[feature].to_numpy(),
@@ -262,8 +276,8 @@ class LookupTableReconstructor(RSDReconstructor):
 		
 		reconstructed_positions = pandas.DataFrame(
 			data = self.lookup_table_of_positions.iloc[idx_reconstructed].to_numpy(),
-			index = features.index,
-			columns = self._positions_columns,
+			index = scaled_features.index,
+			columns = self.positions_names,
 		)
 		return reconstructed_positions
 
@@ -292,13 +306,27 @@ class DiscreteMLEReconstructor(RSDReconstructor):
 		
 		self.lookup_table_of_positions = positions.groupby('n_position').agg(numpy.nanmean)
 	
-	def reconstruct(self, features):
+	def reconstruct(self, features, batch_size:int=None):
 		super().reconstruct(features=features)
 		
 		scaled_features = features.copy()
 		for feature in scaled_features.columns:
 			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
 		
+		if batch_size is None or len(features)<batch_size:
+			reconstructed_positions = self._reconstruct_using_scaled_features(scaled_features)
+		else:
+			reconstructed_positions = []
+			for scaled_features_batch in numpy.array_split(scaled_features, int(len(scaled_features)/batch_size)):
+				_ = self._reconstruct_using_scaled_features(scaled_features_batch)
+				reconstructed_positions.append(_)
+			reconstructed_positions = pandas.concat(reconstructed_positions)
+		
+		return reconstructed_positions
+	
+	def _reconstruct_using_scaled_features(self, scaled_features):
+		"""Performs the actual reconstruction process using the scaled
+		features. Returns the reconstructed positions."""
 		likelihoods = []
 		n_positions = []
 		for n_position, KDE in self.scaled_features_KDEs.items():
@@ -309,6 +337,6 @@ class DiscreteMLEReconstructor(RSDReconstructor):
 		n_positions = numpy.array(n_positions)
 		most_likely_n_position = numpy.argmax(likelihoods, axis=0)
 		reconstructed_positions = self.lookup_table_of_positions.loc[most_likely_n_position]
-		reconstructed_positions.index = features.index
+		reconstructed_positions.index = scaled_features.index
 		
 		return reconstructed_positions
