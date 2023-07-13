@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import ToTensor
 from torch.utils.data import Dataset
 from scipy.stats import gaussian_kde
+import pickle
 
 class RSDReconstructor:
 	def fit(self, positions, features):
@@ -433,6 +434,8 @@ def reconstruction_experiment(bureaucrat:RunBureaucrat):
 				positions = training_data[POSITION_VARIABLES_NAMES],
 				features = training_data[stuff['features_variables_names']],
 			)
+			with open(employee.path_to_directory_of_my_task/'reconstructor.pickle', 'wb') as ofile:
+				pickle.dump(reconstructor, ofile, pickle.HIGHEST_PROTOCOL)
 			print(f'Reconstructing...')
 			reconstructed = reconstructor.reconstruct(testing_data[stuff['features_variables_names']])
 			
