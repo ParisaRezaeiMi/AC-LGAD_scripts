@@ -31,7 +31,7 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 	data.reset_index('n_waveform', drop=True, inplace=True)
 	
 	data = data.query('n_pulse==1')
-	data.reset_index('n_pulse', drop=True, inplace=True)
+	# ~ data.reset_index('n_pulse', drop=True, inplace=True)
 	
 	pads_arrangement = pandas.read_csv(
 		bureaucrat.path_to_run_directory/'pads_arrangement.csv',
