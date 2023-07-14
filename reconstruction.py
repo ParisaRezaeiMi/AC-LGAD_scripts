@@ -106,6 +106,7 @@ def reconstruct(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
 			fig = utils.plot_as_xy_contour(
 				z = testing_data.groupby('n_position').agg(numpy.nanmean)[col],
 				positions_data = positions_data,
+				smoothing_sigma = 2,
 			)
 			fig.update_layout(
 				title = f'{col}<br><sup>{bureaucrat.run_name}</sup>',
@@ -159,6 +160,7 @@ def reconstruct(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
 			fig = utils.plot_as_xy_contour(
 				z = result[col],
 				positions_data = positions_data,
+				smoothing_sigma = 2,
 			)
 			fig.update_layout(
 				title = f'{col} with {reconstructor_name}<br><sup>{bureaucrat.run_name}</sup>',
@@ -184,6 +186,7 @@ def reconstruct(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
 		fig = utils.plot_as_xy_contour(
 			z = reconstruction_error,
 			positions_data = positions_data,
+			smoothing_sigma = 2,
 		)
 		fig.update_layout(
 			title = f'Reconstruction accuracy with {reconstructor_name}<br><sup>{bureaucrat.run_name}</sup>',

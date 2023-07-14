@@ -46,6 +46,7 @@ def time_resolution_analysis(bureaucrat:RunBureaucrat):
 	time_resolution = Delta_t.loc[pad_activation]
 	time_resolution = time_resolution.groupby('n_position').agg(numpy.nanstd)
 	time_resolution.rename(columns={f'Δt_{i} (s)': f'σ_{i} (s)' for i in [10,20,30,40,50,60,70,80,90]}, inplace=True)
+	time_resolution.mask((time_resolution>111e-12), inplace=True) # Remove all "large values" so they don't make the plots to look ugly.
 	
 	with bureaucrat.handle_task('time_resolution') as employee:
 		for col in time_resolution.columns:
@@ -67,6 +68,7 @@ def time_resolution_analysis(bureaucrat:RunBureaucrat):
 				zmin = 0,
 				zmax = 66e-12,
 				title = f'Time resolution k_cfd={k_cfd}<br><sup>{bureaucrat.run_name}</sup>',
+				smoothing_sigma = 2,
 			)
 			fig.write_html(
 				employee.path_to_directory_of_my_task/f'time_resolution_vs_position_n_channel_k_cfd_{k_cfd}_contour.html',
@@ -93,6 +95,7 @@ def time_resolution_analysis(bureaucrat:RunBureaucrat):
 				zmin = 0,
 				zmax = 66e-12,
 				title = f'Time resolution n_channel {n_channel}<br><sup>{bureaucrat.run_name}</sup>',
+				smoothing_sigma = 2,
 			)
 			fig.write_html(
 				employee.path_to_directory_of_my_task/f'time_resolution_vs_position_n_channel_{n_channel}_contour.html',
