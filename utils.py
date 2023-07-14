@@ -13,13 +13,11 @@ def filter_nan_gaussian_david(arr, sigma):
     """
     gauss = arr.copy()
     gauss[numpy.isnan(gauss)] = 0
-    gauss = ndimage.gaussian_filter(
-            gauss, sigma=sigma, mode='constant', cval=0)
+    gauss = ndimage.gaussian_filter(gauss, sigma=sigma, mode='constant', cval=0)
 
     norm = numpy.ones(shape=arr.shape)
     norm[numpy.isnan(arr)] = 0
-    norm = ndimage.gaussian_filter(
-            norm, sigma=sigma, mode='constant', cval=0)
+    norm = ndimage.gaussian_filter(norm, sigma=sigma, mode='constant', cval=0)
 
     # avoid RuntimeWarning: invalid value encountered in true_divide
     norm = numpy.where(norm==0, 1, norm)
