@@ -113,7 +113,7 @@ def plot_as_xy_heatmap(z:pandas.Series, positions_data:pandas.DataFrame, **plotl
 	fig.update_coloraxes(colorbar_title_side='right')
 	return fig
 
-def plot_as_xy_contour(z:pandas.Series, positions_data:pandas.DataFrame, zmin=None, zmax=None, title=None):
+def plot_as_xy_contour(z:pandas.Series, positions_data:pandas.DataFrame, zmin=None, zmax=None, title=None, smoothing_sigma=0):
 	if not isinstance(z, pandas.Series):
 		raise TypeError(f'`z` must be an instance of {pandas.Series}, but received instead an object of type {type(z)}. ')
 	
@@ -142,7 +142,7 @@ def plot_as_xy_contour(z:pandas.Series, positions_data:pandas.DataFrame, zmin=No
 	z = z.T
 	fig = go.Figure(
 		data = go.Contour(
-			z = filter_nan_gaussian_david(z, sigma=2),
+			z = filter_nan_gaussian_david(z.to_numpy(), sigma=smoothing_sigma),
 			x = z.columns,
 			y = z.index,
 			contours = dict(
