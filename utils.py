@@ -103,6 +103,11 @@ def plot_as_xy_heatmap(z:pandas.Series, positions_data:pandas.DataFrame, **plotl
 	z.index.name = 'x (m)'
 	z.columns.name = 'y (m)'
 	z = z.T
+	z = pandas.DataFrame(
+		data = numpy.flip(z.to_numpy(), axis=0),
+		index = z.index,
+		columns = z.columns,
+	)
 	fig = px.imshow(
 		z,
 		labels = dict(
