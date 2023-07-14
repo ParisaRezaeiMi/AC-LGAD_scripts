@@ -50,30 +50,36 @@ def time_resolution_analysis(bureaucrat:RunBureaucrat):
 	
 	with bureaucrat.handle_task('time_resolution') as employee:
 		for col in time_resolution.columns:
-			k_cfd = int(col.replace('σ_','').replace(' (s)',''))
-			fig = utils.plot_as_xy_heatmap(
-				z = time_resolution[col],
-				positions_data = positions_data,
-				zmin = 0,
-				zmax = 111e-12,
-				title = f'Time resolution k_cfd={k_cfd}<br><sup>{bureaucrat.run_name}</sup>',
-			)
-			fig.write_html(
-				employee.path_to_directory_of_my_task/f'time_resolution_vs_position_n_channel_k_cfd_{k_cfd}_heatmap.html',
-				include_plotlyjs = 'cdn',
-			)
-			fig = utils.plot_as_xy_contour(
-				z = time_resolution[col],
-				positions_data = positions_data,
-				zmin = 0,
-				zmax = 66e-12,
-				title = f'Time resolution k_cfd={k_cfd}<br><sup>{bureaucrat.run_name}</sup>',
-				smoothing_sigma = 2,
-			)
-			fig.write_html(
-				employee.path_to_directory_of_my_task/f'time_resolution_vs_position_n_channel_k_cfd_{k_cfd}_contour.html',
-				include_plotlyjs = 'cdn',
-			)
+			try:
+				k_cfd = int(col.replace('σ_','').replace(' (s)',''))
+				fig = utils.plot_as_xy_heatmap(
+					z = time_resolution[col],
+					positions_data = positions_data,
+					zmin = 0,
+					zmax = 111e-12,
+					title = f'Time resolution k_cfd={k_cfd}<br><sup>{bureaucrat.run_name}</sup>',
+				)
+				fig.write_html(
+					employee.path_to_directory_of_my_task/f'time_resolution_vs_position_n_channel_k_cfd_{k_cfd}_heatmap.html',
+					include_plotlyjs = 'cdn',
+				)
+				fig = utils.plot_as_xy_contour(
+					z = time_resolution[col],
+					positions_data = positions_data,
+					zmin = 0,
+					zmax = 66e-12,
+					title = f'Time resolution k_cfd={k_cfd}<br><sup>{bureaucrat.run_name}</sup>',
+					smoothing_sigma = 2,
+				)
+				fig.write_html(
+					employee.path_to_directory_of_my_task/f'time_resolution_vs_position_n_channel_k_cfd_{k_cfd}_contour.html',
+					include_plotlyjs = 'cdn',
+				)
+			except ValueError as e:
+				if 'Length mismatch:' in repr(e):
+					continue
+				else:
+					raise e
 		for n_channel,df in Delta_t.groupby('n_channel'):
 			df = df.groupby('n_position').agg(numpy.nanstd)
 			df = df.min(axis=1)
