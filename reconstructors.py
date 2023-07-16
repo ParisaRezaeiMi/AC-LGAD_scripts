@@ -456,5 +456,32 @@ class MultipadWeightedTimeReconstructor(RSDTimeReconstructor):
 		if set(features.columns.get_level_values(0)) != {'weight','time'} or len(features.columns.names) != 2 or features.columns.names[1] != 'n_channel':
 			raise ValueError(f'`features` must have 2 levels of columns, the top level should be `weight` and `time`, while the second level must be named `n_channel` and should contain integer numbers for each of the channels.')
 		
-		reconstructed_time = sum([features[('time',n)]*features[('weight',n)] for n in features.columns.get_level_values('n_channel')])/features['weight'].sum(axis=1)
+		leading_channel = features[['weight']]
+		_ = leading_channel.max(axis=1)
+		for col in leading_channel.columns:
+			with warnings.catch_warnings():
+				warnings.simplefilter("ignore")
+				leading_channel[col] = leading_channel[col] == _
+		leading_channel = leading_channel.stack('n_channel')['weight']
+		leading_channel.name = 'channel_is_active'
+		
+		with warnings.catch_warnings():
+			warnings.simplefilter("ignore")
+			time_from_leading_channel = features[['time']].stack('n_channel')
+			time_from_leading_channel.loc[~leading_channel] = float('NaN')
+			time_from_leading_channel.reset_index('n_channel', drop=True, inplace=True)
+			time_from_leading_channel = time_from_leading_channel.groupby(time_from_leading_channel.index.names).agg(numpy.nansum)
+			time_from_leading_channel = time_from_leading_channel['time']
+			_ = time_from_leading_channel
+			time_from_leading_channel = features[['time']]
+			for n_channel in features.columns.get_level_values('n_channel').drop_duplicates():
+				time_from_leading_channel[('time',n_channel)] -= _
+			time_from_leading_channel = time_from_leading_channel.stack('n_channel')['time']
+			time_from_leading_channel[(time_from_leading_channel.abs()>100e-12)] = float('NaN')
+			time_from_leading_channel.name = ''
+			time_from_leading_channel.loc[~time_from_leading_channel.isna()] = 1
+			time_from_leading_channel = time_from_leading_channel.unstack('n_channel')
+			use_these_for_computing_time_resolution = time_from_leading_channel
+		
+		reconstructed_time = (features['time']*features['weight']*use_these_for_computing_time_resolution).sum(axis=1, skipna=True)/(features['weight']*use_these_for_computing_time_resolution).sum(axis=1, skipna=True)
 		return reconstructed_time
