@@ -81,28 +81,28 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 	n_triggers_per_position = max(set(variables.index.get_level_values('n_trigger'))) + 1
 	RECONSTRUCTORS_TO_TEST = [
 		# ~ dict(
-			# ~ reconstructor = reconstructors.SVMReconstructor(),
+			# ~ reconstructor = reconstructors.SVMPositionReconstructor(),
 			# ~ training_data = variables.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
 			# ~ testing_data = variables.query(f'n_trigger >= {int(n_triggers_per_position*1/3)}'),
 			# ~ features_variables_names = ['f_amplitude_horizontal','f_amplitude_vertical'],
 			# ~ reconstructor_name = 'SVR_reconstructor_with_f_amplitudes',
 		# ~ ),
 		# ~ dict(
-			# ~ reconstructor = reconstructors.SVMReconstructor(),
+			# ~ reconstructor = reconstructors.SVMPositionReconstructor(),
 			# ~ training_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
 			# ~ testing_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
 			# ~ features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
 			# ~ reconstructor_name = 'SVR_reconstructor_with_amplitudes',
 		# ~ ),
 		# ~ dict(
-			# ~ reconstructor = reconstructors.DNNReconstructor(),
+			# ~ reconstructor = reconstructors.DNNPositionReconstructor(),
 			# ~ training_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
 			# ~ testing_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
 			# ~ features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
 			# ~ reconstructor_name = 'DNN_reconstructor_with_amplitudes',
 		# ~ ),
 		dict(
-			reconstructor = reconstructors.LookupTableReconstructor(),
+			reconstructor = reconstructors.LookupTablePositionReconstructor(),
 			training_data = amplitude_data,
 			testing_data = amplitude_data,
 			features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
@@ -112,7 +112,7 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 			),
 		),
 		dict(
-			reconstructor = reconstructors.DiscreteMLEReconstructor(),
+			reconstructor = reconstructors.DiscreteMLEPositionReconstructor(),
 			training_data = amplitude_data,
 			testing_data = amplitude_data,
 			features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
@@ -122,7 +122,7 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 			),
 		),
 		dict(
-			reconstructor = reconstructors.LookupTableReconstructor(),
+			reconstructor = reconstructors.LookupTablePositionReconstructor(),
 			training_data = amplitude_share_data,
 			testing_data = amplitude_share_data,
 			features_variables_names = [f'Amplitude shared fraction {_}' for _ in [1,2,3,4]],
@@ -132,7 +132,7 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 			),
 		),
 		dict(
-			reconstructor = reconstructors.DiscreteMLEReconstructor(),
+			reconstructor = reconstructors.DiscreteMLEPositionReconstructor(),
 			training_data = amplitude_share_data_for_discrete_MLE_algorithm,
 			testing_data = amplitude_share_data_for_discrete_MLE_algorithm,
 			features_variables_names = [f'Amplitude shared fraction {_}' for _ in [1,2,3,4]],

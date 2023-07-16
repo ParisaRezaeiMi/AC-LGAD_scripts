@@ -8,8 +8,9 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import ToTensor
 from torch.utils.data import Dataset
 from scipy.stats import gaussian_kde
+import warnings
 
-class RSDReconstructor:
+class RSDPositionReconstructor:
 	def fit(self, positions, features):
 		"""Fit the model using the training data.
 		
@@ -59,7 +60,7 @@ class RSDReconstructor:
 		if set(features.columns) != set(self.features_names):
 			raise ValueError(f'`features` columns do not match the ones used during the fitting. During the fitting process I received {sorted(set(self.features_names))} and now for reconstruction I am receiving {sorted(set(features.columns))}. ')
 
-class SVMReconstructor(RSDReconstructor):
+class SVMPositionReconstructor(RSDPositionReconstructor):
 	def fit(self, positions, features):
 		super().fit(positions=positions, features=features) # Performs some data curation and general stuff common to any machine learning method.
 		
@@ -91,7 +92,7 @@ class SVMReconstructor(RSDReconstructor):
 			reconstructed[col] = self.scalers[col].inverse_transform(reconstructed[[col]])
 		return reconstructed
 
-class DNNReconstructor(RSDReconstructor):
+class DNNPositionReconstructor(RSDPositionReconstructor):
 	class RSDDataLoader(Dataset):
 		def __init__(self, positions:pandas.DataFrame, features:pandas.DataFrame, transform=None, target_transform=None, batch_size:int=1, shuffle:bool=False):
 			df = pandas.concat([positions,features], axis=1)
@@ -231,7 +232,7 @@ class DNNReconstructor(RSDReconstructor):
 		
 		return reconstructed
 
-class LookupTableReconstructor(RSDReconstructor):
+class LookupTablePositionReconstructor(RSDPositionReconstructor):
 	def fit(self, positions, features):
 		super().fit(positions=positions, features=features) # Performs some data curation and general stuff common to any method.
 		
@@ -247,7 +248,7 @@ class LookupTableReconstructor(RSDReconstructor):
 		Arguments
 		---------
 		features: pandas.DataFrame
-			See description of `RSDReconstructor`.
+			See description of `RSDPositionReconstructor`.
 		batch_size: int, default `None`
 			When `features` is very large, it can cause the computer to
 			run out of memory when performing the reconstruction. The
@@ -293,7 +294,7 @@ class LookupTableReconstructor(RSDReconstructor):
 		)
 		return reconstructed_positions
 
-class DiscreteMLEReconstructor(RSDReconstructor):
+class DiscreteMLEPositionReconstructor(RSDPositionReconstructor):
 	def fit(self, positions, features):
 		super().fit(positions=positions, features=features) # Performs some data curation and general stuff common to any method.
 		
@@ -323,7 +324,7 @@ class DiscreteMLEReconstructor(RSDReconstructor):
 		Arguments
 		---------
 		features: pandas.DataFrame
-			See description of `RSDReconstructor`.
+			See description of `RSDPositionReconstructor`.
 		batch_size: int, default `None`
 			When `features` is very large, it can cause the computer to
 			run out of memory when performing the reconstruction. The
@@ -364,3 +365,96 @@ class DiscreteMLEReconstructor(RSDReconstructor):
 		reconstructed_positions.index = scaled_features.index
 		
 		return reconstructed_positions
+
+########################################################################
+########################################################################
+########################################################################
+
+class RSDTimeReconstructor:
+	def reconstruct(self, features):
+		raise NotImplemented(f'This is a prototype method, do not call it.')
+
+class OnePadTimeReconstructor(RSDTimeReconstructor):
+	def reconstruct(self, features):
+		"""Reconstruct the impact time for each event.
+		
+		Arguments
+		---------
+		features: pandas.DataFrame
+			A data frame with the data required for the time reconstruction.
+			A data frame of the form
+			```
+												  time                                              weight                              
+			n_channel                                1             2             3             4         1         2         3         4
+			n_position n_trigger n_pulse                                                                                                
+			0          0         1        2.553036e-09  2.226954e-09  3.443067e-09  3.550194e-09  0.015508  0.092558  0.006624  0.007211
+								 2        1.011417e-07  1.008971e-07  9.415563e-08  6.134500e-08  0.012811  0.061471  0.005120  0.004641
+					   1         1        2.594698e-09  2.219940e-09  3.370886e-09  3.225759e-09  0.013190  0.083752  0.006920  0.006954
+								 2        1.012139e-07  1.008638e-07  4.050543e-08  4.041096e-08  0.009761  0.057924  0.008160  0.007454
+					   2         1        2.573569e-09  2.207249e-09  3.564645e-09  3.413975e-09  0.016862  0.102959  0.007694  0.006463
+			...                                    ...           ...           ...           ...       ...       ...       ...       ...
+			2024       8         2        1.021516e-07  6.929512e-08  4.686199e-08  1.008832e-07  0.008351  0.005368  0.004110  0.026114
+					   9         1        2.919888e-08  1.108853e-08  2.850360e-08  2.259533e-09  0.006050  0.008061  0.005201  0.021381
+								 2        8.119503e-08  9.136477e-08  1.023884e-07  1.009116e-07  0.006302  0.005466  0.005987  0.013988
+					   10        1        7.226838e-10  2.579804e-08  2.914910e-09  2.216060e-09  0.004999  0.005680  0.005031  0.023300
+								 2        9.012005e-08  1.187095e-07  3.409594e-08  1.009591e-07  0.004036  0.004951  0.004300  0.020847
+
+			[44550 rows x 8 columns]
+			```
+			is expected.
+		"""
+		if not isinstance(features, pandas.DataFrame):
+			raise TypeError(f'`features` must be an instance of {pandas.DataFrame}, received object of type {type(features)}. ')
+		if set(features.columns.get_level_values(0)) != {'weight','time'} or len(features.columns.names) != 2 or features.columns.names[1] != 'n_channel':
+			raise ValueError(f'`features` must have 2 levels of columns, the top level should be `weight` and `time`, while the second level must be named `n_channel` and should contain integer numbers for each of the channels.')
+		
+		active_channel = features[['weight']]
+		_ = active_channel.max(axis=1)
+		for col in active_channel.columns:
+			with warnings.catch_warnings():
+				warnings.simplefilter("ignore")
+				active_channel[col] = active_channel[col] == _
+		active_channel = active_channel.stack('n_channel')['weight']
+		active_channel.name = 'channel_is_active'
+		
+		reconstructed_time = features.stack('n_channel').loc[active_channel,'time']
+		reconstructed_time.reset_index('n_channel', drop=True, inplace=True)
+		
+		return reconstructed_time
+
+class MultipadWeightedTimeReconstructor(RSDTimeReconstructor):
+	def reconstruct(self, features):
+		"""Reconstruct the impact time for each event.
+		
+		Arguments
+		---------
+		features: pandas.DataFrame
+			A data frame with the data required for the time reconstruction.
+			A data frame of the form
+			```
+												  time                                              weight                              
+			n_channel                                1             2             3             4         1         2         3         4
+			n_position n_trigger n_pulse                                                                                                
+			0          0         1        2.553036e-09  2.226954e-09  3.443067e-09  3.550194e-09  0.015508  0.092558  0.006624  0.007211
+								 2        1.011417e-07  1.008971e-07  9.415563e-08  6.134500e-08  0.012811  0.061471  0.005120  0.004641
+					   1         1        2.594698e-09  2.219940e-09  3.370886e-09  3.225759e-09  0.013190  0.083752  0.006920  0.006954
+								 2        1.012139e-07  1.008638e-07  4.050543e-08  4.041096e-08  0.009761  0.057924  0.008160  0.007454
+					   2         1        2.573569e-09  2.207249e-09  3.564645e-09  3.413975e-09  0.016862  0.102959  0.007694  0.006463
+			...                                    ...           ...           ...           ...       ...       ...       ...       ...
+			2024       8         2        1.021516e-07  6.929512e-08  4.686199e-08  1.008832e-07  0.008351  0.005368  0.004110  0.026114
+					   9         1        2.919888e-08  1.108853e-08  2.850360e-08  2.259533e-09  0.006050  0.008061  0.005201  0.021381
+								 2        8.119503e-08  9.136477e-08  1.023884e-07  1.009116e-07  0.006302  0.005466  0.005987  0.013988
+					   10        1        7.226838e-10  2.579804e-08  2.914910e-09  2.216060e-09  0.004999  0.005680  0.005031  0.023300
+								 2        9.012005e-08  1.187095e-07  3.409594e-08  1.009591e-07  0.004036  0.004951  0.004300  0.020847
+
+			[44550 rows x 8 columns]
+			```
+			is expected.
+		"""
+		if not isinstance(features, pandas.DataFrame):
+			raise TypeError(f'`features` must be an instance of {pandas.DataFrame}, received object of type {type(features)}. ')
+		if set(features.columns.get_level_values(0)) != {'weight','time'} or len(features.columns.names) != 2 or features.columns.names[1] != 'n_channel':
+			raise ValueError(f'`features` must have 2 levels of columns, the top level should be `weight` and `time`, while the second level must be named `n_channel` and should contain integer numbers for each of the channels.')
+		
+		reconstructed_time = sum([features[('time',n)]*features[('weight',n)] for n in features.columns.get_level_values('n_channel')])/features['weight'].sum(axis=1)
+		return reconstructed_time
