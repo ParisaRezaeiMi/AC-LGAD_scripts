@@ -129,21 +129,59 @@ def time_reconstructors_testing(bureaucrat:RunBureaucrat):
 	data = parsed_from_waveforms
 	data.reset_index('n_waveform', drop=True, inplace=True)
 	
-	time_data = data[[f't_{x} (s)' for x in [10,20,30,40,50,60,70,80,90]]]
+	RECONSTRUCTORS_TO_TEST = [
+		dict(
+			reconstructor = OnePadTimeReconstructor(),
+			name = 'one_pad_time_reconstructor',
+		),
+		dict(
+			reconstructor = MultipadWeightedTimeReconstructor(),
+			name = 'multi_pad_time_reconstructor',
+		)
+	]
 	
-	reconstructor = MultipadWeightedTimeReconstructor()
-	features = pandas.DataFrame(index=data.index)
-	features['time'] = time_data['t_50 (s)']
-	features['weight'] = data['Amplitude (V)']
-	features = features.unstack('n_channel')
-	reconstructed_time = reconstructor.reconstruct(features=features)
-	reconstructed_time.name = 'Reconstructed time (s)'
-	reconstructed_time = reconstructed_time.to_frame()
-	reconstructed_time = reconstructed_time.unstack('n_pulse')
-	Delta_t = reconstructed_time[('Reconstructed time (s)',2)] - reconstructed_time[('Reconstructed time (s)',1)]
-	Delta_t.name = 'Δt (s)'
-	
-	print(Delta_t)
+	for reco_stuff in RECONSTRUCTORS_TO_TEST:
+		with bureaucrat.handle_task(f'time_resolution_using_{reco_stuff["name"].replace(" ","_")}') as employee:
+			for k_CFD in [10,20,30,40,50,60,70,80,90]:
+				reconstructor = reco_stuff['reconstructor']
+				features = pandas.DataFrame(index=data.index)
+				features['time'] = data[f't_{k_CFD} (s)']
+				features['weight'] = data['Amplitude (V)']
+				features = features.unstack('n_channel')
+				reconstructed_time = reconstructor.reconstruct(features=features)
+				reconstructed_time.name = 'Reconstructed time (s)'
+				reconstructed_time = reconstructed_time.to_frame()
+				reconstructed_time = reconstructed_time.unstack('n_pulse')
+				Delta_t = reconstructed_time[('Reconstructed time (s)',2)] - reconstructed_time[('Reconstructed time (s)',1)]
+				Delta_t.name = 'Δt (s)'
+				
+				time_resolution = Delta_t.groupby('n_position').agg(numpy.nanstd)
+				time_resolution.name = 'Time resolution (s)'
+				
+				fig = utils.plot_as_xy_heatmap(
+					z = time_resolution,
+					positions_data = positions_data,
+					zmin = 0,
+					zmax = 111e-12,
+					title = f'Time resolution vs position<br><sup>k_CFD={k_CFD}, reconstruction algorithm: {reco_stuff["name"]}</sup><br><sup>{bureaucrat.run_name}</sup>',
+				)
+				fig.write_html(
+					employee.path_to_directory_of_my_task/f'time_resolution_vs_position_k_CFD_{k_CFD}_heatmap.html',
+					include_plotlyjs = 'cdn',
+				)
+				fig = utils.plot_as_xy_contour(
+					z = time_resolution,
+					positions_data = positions_data,
+					zmin = 0,
+					zmax = 66e-12,
+					title = f'Time resolution vs position<br><sup>k_CFD={k_CFD}, reconstruction algorithm: {reco_stuff["name"]}</sup><br><sup>{bureaucrat.run_name}</sup>',
+					smoothing_sigma = 2,
+				)
+				fig.write_html(
+					employee.path_to_directory_of_my_task/f'time_resolution_vs_position_k_CFD_{k_CFD}_contour.html',
+					include_plotlyjs = 'cdn',
+				)
+				
 
 if __name__ == '__main__':
 	import argparse
