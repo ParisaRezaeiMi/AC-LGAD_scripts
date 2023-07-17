@@ -132,11 +132,11 @@ def time_reconstructors_testing(bureaucrat:RunBureaucrat):
 	RECONSTRUCTORS_TO_TEST = [
 		dict(
 			reconstructor = OnePadTimeReconstructor(),
-			name = 'one_pad_time_reconstructor',
+			name = 'OnePadTimeReconstructor',
 		),
 		dict(
 			reconstructor = MultipadWeightedTimeReconstructor(),
-			name = 'multi_pad_time_reconstructor',
+			name = 'MultipadWeightedTimeReconstructor',
 		)
 	]
 	
@@ -163,7 +163,7 @@ def time_reconstructors_testing(bureaucrat:RunBureaucrat):
 					positions_data = positions_data,
 					zmin = 0,
 					zmax = 111e-12,
-					title = f'Time resolution vs position<br><sup>k_CFD={k_CFD}, reconstruction algorithm: {reco_stuff["name"]}</sup><br><sup>{bureaucrat.run_name}</sup>',
+					title = f'Time resolution vs position<br><sup>k_CFD={k_CFD}, reconstructor: {reco_stuff["name"]}</sup><br><sup>{bureaucrat.run_name}</sup>',
 				)
 				fig.write_html(
 					employee.path_to_directory_of_my_task/f'time_resolution_vs_position_k_CFD_{k_CFD}_heatmap.html',
@@ -174,7 +174,7 @@ def time_reconstructors_testing(bureaucrat:RunBureaucrat):
 					positions_data = positions_data,
 					zmin = 0,
 					zmax = 66e-12,
-					title = f'Time resolution vs position<br><sup>k_CFD={k_CFD}, reconstruction algorithm: {reco_stuff["name"]}</sup><br><sup>{bureaucrat.run_name}</sup>',
+					title = f'Time resolution vs position<br><sup>k_CFD={k_CFD}, reconstructor: {reco_stuff["name"]}</sup><br><sup>{bureaucrat.run_name}</sup>',
 					smoothing_sigma = 2,
 				)
 				fig.write_html(
