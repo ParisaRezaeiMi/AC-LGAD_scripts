@@ -177,3 +177,44 @@ def plot_as_xy_contour(z:pandas.Series, positions_data:pandas.DataFrame, zmin=No
 		title = title,
 	)
 	return fig
+
+def resample_positions(positions_data:pandas.DataFrame, new_n_x:int, new_n_y:int):
+	dxy = {}
+	xy_start = {}
+	xy_stop = {}
+	for xy,n in {'x':new_n_x,'y':new_n_y}.items():
+		minval = numpy.nanmin(positions_data[f'{xy} (m)'])
+		maxval = numpy.nanmax(positions_data[f'{xy} (m)'])
+		dxy[xy] = (maxval-minval)/(n)
+		xy_start[xy] = minval
+		xy_stop[xy] = maxval
+	
+	dx_old = numpy.diff(positions_data['x (m)'].drop_duplicates())[0]
+	dy_old = numpy.diff(positions_data['y (m)'].drop_duplicates())[0]
+	
+	resampled_positions_data = positions_data.copy()
+	new_n_position = -1
+	y_boundaries = numpy.arange(start=xy_start['y'],stop=xy_stop['y'],step=dxy['y'])
+	x_boundaries = numpy.arange(start=xy_start['x'],stop=xy_stop['x'],step=dxy['x'])
+	for new_ny,new_y in enumerate(y_boundaries):
+		for new_nx,new_x in enumerate(x_boundaries):
+			new_n_position += 1
+			for key,val in {'n_x':new_nx, 'n_y':new_ny, 'n_position':new_n_position, 'x (m)':new_x+dxy['x']/2, 'y (m)':new_y+dxy['y']/2}.items():
+				resampled_positions_data.loc[(positions_data['x (m)']>=new_x)&(positions_data['x (m)']<=new_x+dxy['x']+dx_old*1.1)&(positions_data['y (m)']>=new_y)&(positions_data['y (m)']<=new_y+dxy['y']+dy_old*1.1), key] = val
+	resampled_positions_data = resampled_positions_data.astype({'n_x':int,'n_y':int,'n_position':int})
+	resampled_positions_data.index.rename('old_n_position', inplace=True)
+	
+	n_position_fixed = 0
+	for n_position in sorted(resampled_positions_data['n_position'].drop_duplicates()):
+		_ = resampled_positions_data.loc[resampled_positions_data['n_position']==n_position]
+		resampled_positions_data.loc[resampled_positions_data['n_position']==n_position,'n_position'] = n_position_fixed
+		if len(_) > 0:
+			n_position_fixed += 1
+	
+	n_position_mapping = resampled_positions_data['n_position']
+	resampled_positions_data.set_index('n_position', inplace=True)
+	resampled_positions_data = resampled_positions_data.drop_duplicates()
+	return resampled_positions_data, n_position_mapping
+
+if __name__ == '__main__':
+	raise RuntimeError()
