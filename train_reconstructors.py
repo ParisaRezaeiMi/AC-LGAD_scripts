@@ -10,6 +10,33 @@ import pickle
 import reconstructors
 import logging
 
+def calculate_features(data:pandas.DataFrame, is_this_for_training:bool=False):
+	# Calculate some event-wise stuff:
+	data = data.unstack('n_channel')
+	for n_channel in data.columns.get_level_values('n_channel').drop_duplicates():
+		data[('Total amplitude (V)',n_channel)] = data[[('Amplitude (V)',_) for _ in data.columns.get_level_values('n_channel').drop_duplicates()]].sum(axis=1)
+		data[('ASF',n_channel)] = data[('Amplitude (V)',n_channel)]/data[('Total amplitude (V)',n_channel)]
+	# Calculate whatever will be fed into the ML reconstructors:
+	features = {}
+	for _ in {'ASF'}:
+		features[f'f_{_}_horizontal'] = data[(f'ASF',1)] + data[(f'ASF',3)] - data[(f'ASF',2)] - data[(f'ASF',4)]
+		features[f'f_{_}_vertical'] = data[(f'ASF',1)] + data[(f'ASF',2)] - data[(f'ASF',3)] - data[(f'ASF',4)]
+	for _,_2 in features.items():
+		_2.name = _
+	features = pandas.concat([item for _,item in features.items()], axis=1)
+	# ~ data = data.stack('n_channel') # Revert what I have done before.
+	
+	amplitude_shared_fraction = data[['ASF']]
+	amplitude_shared_fraction.columns = [f'ASF {n_channel}' for n_channel in amplitude_shared_fraction.columns.get_level_values('n_channel')]
+	if is_this_for_training == True:
+		amplitude_shared_fraction = amplitude_shared_fraction + numpy.random.randn(*amplitude_shared_fraction.shape)/999999 # This has to be added because otherwise it fails due to some algebra error. I think that this is because the amplitude share data is so good quality (in terms of the correlations between the different channels) that then it fails to invert some matrix, or something like this. Adding some noise fixes this.
+	
+	amplitude = data[['Amplitude (V)']]
+	amplitude.columns = [' '.join([str(__) for __ in _]) for _ in amplitude.columns]
+	
+	return pandas.concat([features,amplitude_shared_fraction,amplitude], axis=1)
+	
+
 def train_reconstructors(bureaucrat:RunBureaucrat):
 	bureaucrat.check_these_tasks_were_run_successfully('TCT_2D_scan')
 	
@@ -39,31 +66,9 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 		},
 	)
 	
-	# Calculate some event-wise stuff:
-	data = data.unstack('n_channel')
-	for n_channel in data.columns.get_level_values('n_channel').drop_duplicates():
-		data[('Total amplitude (V)',n_channel)] = data[[('Amplitude (V)',_) for _ in data.columns.get_level_values('n_channel').drop_duplicates()]].sum(axis=1)
-		data[('ASF',n_channel)] = data[('Amplitude (V)',n_channel)]/data[('Total amplitude (V)',n_channel)]
-	# Calculate whatever will be fed into the ML reconstructors:
-	features = {}
-	for _ in {'ASF'}:
-		features[f'f_{_}_horizontal'] = data[(f'ASF',1)] + data[(f'ASF',3)] - data[(f'ASF',2)] - data[(f'ASF',4)]
-		features[f'f_{_}_vertical'] = data[(f'ASF',1)] + data[(f'ASF',2)] - data[(f'ASF',3)] - data[(f'ASF',4)]
-	for _,_2 in features.items():
-		_2.name = _
-	features = pandas.concat([item for _,item in features.items()], axis=1)
-	data = data.stack('n_channel') # Revert what I have done before.
-	
-	amplitude_shared_fraction = data[['ASF']].unstack('n_channel')
-	amplitude_shared_fraction.columns = [f'ASF {n_channel}' for n_channel in amplitude_shared_fraction.columns.get_level_values('n_channel')]
-	amplitude_shared_fraction = amplitude_shared_fraction + numpy.random.randn(*amplitude_shared_fraction.shape)/999999 # This has to be added because otherwise it fails due to some algebra error. I think that this is because the amplitude share data is so good quality (in terms of the correlations between the different channels) that then it fails to invert some matrix, or something like this. Adding some noise fixes this.
-	
-	amplitude = data[['Amplitude (V)']].unstack('n_channel')
-	amplitude.columns = [' '.join([str(__) for __ in _]) for _ in amplitude.columns]
-	
-	features = pandas.concat([features,amplitude_shared_fraction,amplitude], axis=1)
-	
 	positions_data, n_position_mapping = utils.resample_positions(positions_data,*[18 for _ in ['x','y']])
+	
+	features = calculate_features(data, is_this_for_training=True)
 	
 	# Update position data:
 	features = features.join(n_position_mapping, on='n_position')

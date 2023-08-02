@@ -8,6 +8,7 @@ import numpy
 import logging
 import sqlite3
 import json
+from train_reconstructors import calculate_features
 
 POSITION_VARIABLES_NAMES = ['x (m)','y (m)']
 
@@ -54,7 +55,7 @@ def reconstruct(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
 			open(employee.path_to_directory_of_my_task/'reconstructor_info.json','w')
 		)
 		
-		testing_data = amplitude_shared_fraction
+		testing_data = calculate_features(data)
 		
 		path_for_plots = employee.path_to_directory_of_my_task/'features'
 		for col in reconstructor.features_names:
@@ -116,6 +117,8 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 	
 	reconstructed = pandas.read_pickle(bureaucrat.path_to_directory_of_task(reconstruction_task_name)/'reconstructed_positions.pickle')
 	
+	logging.info('Processing data...')
+	
 	reconstruction_error = numpy.sum((original-reconstructed)**2, axis=1)**.5
 	reconstruction_error.name = 'Reconstruction error (m)'
 	
@@ -132,8 +135,11 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 		reconstructor_info = json.load(ifile)
 	
 	with bureaucrat.handle_task(f'{reconstruction_task_name}_analysis') as employee:
+		logging.info('Producing and saving plots...')
 		for col in {'Reconstruction error std (m)','Reconstruction error mean (m)'}:
 			title = f'{col.replace(" (m)","")}<br><sup>{bureaucrat.run_name}</sup>'
+			subtitle_lines = [f'Reconstructor: {reconstructor_info["reconstructor_name"]}',f'Training data: {Path(reconstructor_info["path_to_reconstructor_pickle"]).parent.parent.name}']
+			title += '<br><sup>' + '</sup><br><sup>'.join(subtitle_lines) + '</sup>'
 			fig = utils.plot_as_xy_heatmap(
 				z = result[col],
 				positions_data = positions_data,
@@ -141,7 +147,10 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 				aspect = 'equal',
 				origin = 'lower',
 				text_auto = True,
+				zmin = 0,
+				zmax = 33e-6
 			)
+			fig.update_layout(margin=dict(l=20, r=20, t=60, b=20))
 			fig.write_html(
 				employee.path_to_directory_of_my_task/f'{col}_heatmap.html',
 				include_plotlyjs = 'cdn',
@@ -158,7 +167,30 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 				employee.path_to_directory_of_my_task/f'{col}_contour.html',
 				include_plotlyjs = 'cdn',
 			)
-	a
+		logging.info(f'Finished with {bureaucrat.run_name}.')
+
+def reconstruct_and_analyze(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
+	# ~ reconstruct(
+		# ~ bureaucrat = bureaucrat,
+		# ~ path_to_reconstructor_pickle = path_to_reconstructor_pickle,
+	# ~ )
+	analyze_reconstruction(
+		bureaucrat = bureaucrat,
+		reconstruction_task_name = f'reconstruction_using_{path_to_reconstructor_pickle.parent.name}',
+	)
+
+def reconstruct_and_analyze_using_all_available_reconstructors(bureaucrat:RunBureaucrat, bureaucrat_where_to_search_for_reconstructors:RunBureaucrat):
+	possible_tasks_having_to_do_with_trained_reconstructors = [p.name for p in bureaucrat_where_to_search_for_reconstructors.path_to_run_directory.iterdir() if p.name[:len('position_reconstructor_')]=='position_reconstructor_']
+	
+	for task_name in possible_tasks_having_to_do_with_trained_reconstructors:
+		if not bureaucrat_where_to_search_for_reconstructors.was_task_run_successfully(task_name):
+			continue
+		logging.info(f'Found task called {task_name} in {bureaucrat_where_to_search_for_reconstructors.run_name} that looks like a reconstructor, will attempt to use it...')
+		reconstruct_and_analyze(
+			bureaucrat = bureaucrat,
+			path_to_reconstructor_pickle = bureaucrat_where_to_search_for_reconstructors.path_to_directory_of_task(task_name)/'reconstructor.pickle',
+		)
+		logging.info(f'Finished reconstructing with {task_name}.')
 	
 if __name__ == '__main__':
 	import argparse
@@ -168,7 +200,7 @@ if __name__ == '__main__':
 	logging.basicConfig(
 		stream = sys.stderr, 
 		level = logging.DEBUG,
-		format = '%(asctime)s|%(levelname)s|%(message)s',
+		format = '%(asctime)s|%(levelname)s|%(funcName)s: %(message)s',
 		datefmt = '%Y-%m-%d %H:%M:%S',
 	)
 	
@@ -192,11 +224,11 @@ if __name__ == '__main__':
 	
 	args = parser.parse_args()
 	bureaucrat = RunBureaucrat(Path(args.directory))
-	# ~ reconstruct(
+	# ~ reconstruct_and_analyze(
 		# ~ bureaucrat = bureaucrat,
 		# ~ path_to_reconstructor_pickle = Path(args.path_to_reconstructor),
 	# ~ )
-	analyze_reconstruction(
+	reconstruct_and_analyze_using_all_available_reconstructors(
 		bureaucrat = bureaucrat,
-		reconstruction_task_name = f'reconstruction_using_{Path(args.path_to_reconstructor).parent.name}',
+		bureaucrat_where_to_search_for_reconstructors = RunBureaucrat(Path(args.path_to_reconstructor)),
 	)
