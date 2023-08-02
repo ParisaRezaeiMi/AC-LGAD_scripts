@@ -147,8 +147,8 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 				aspect = 'equal',
 				origin = 'lower',
 				text_auto = True,
-				zmin = 0,
-				zmax = 33e-6
+				# ~ zmin = 0,
+				# ~ zmax = 33e-6
 			)
 			fig.update_layout(margin=dict(l=20, r=20, t=60, b=20))
 			fig.write_html(
@@ -170,10 +170,10 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 		logging.info(f'Finished with {bureaucrat.run_name}.')
 
 def reconstruct_and_analyze(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
-	# ~ reconstruct(
-		# ~ bureaucrat = bureaucrat,
-		# ~ path_to_reconstructor_pickle = path_to_reconstructor_pickle,
-	# ~ )
+	reconstruct(
+		bureaucrat = bureaucrat,
+		path_to_reconstructor_pickle = path_to_reconstructor_pickle,
+	)
 	analyze_reconstruction(
 		bureaucrat = bureaucrat,
 		reconstruction_task_name = f'reconstruction_using_{path_to_reconstructor_pickle.parent.name}',
@@ -200,7 +200,7 @@ if __name__ == '__main__':
 	logging.basicConfig(
 		stream = sys.stderr, 
 		level = logging.DEBUG,
-		format = '%(asctime)s|%(levelname)s|%(funcName)s: %(message)s',
+		format = '%(asctime)s|%(levelname)s|%(funcName)s|%(message)s',
 		datefmt = '%Y-%m-%d %H:%M:%S',
 	)
 	
