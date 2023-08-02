@@ -1,15 +1,14 @@
 from the_bureaucrat.bureaucrats import RunBureaucrat # https://github.com/SengerM/the_bureaucrat
 from pathlib import Path
 import pandas
-from huge_dataframe.SQLiteDataFrame import load_whole_dataframe # https://github.com/SengerM/huge_dataframe
+import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
-import matplotlib.pyplot as plt
-from grafica.plotly_utils.utils import set_my_template_as_default
 import numpy
 import utils
 import pickle
 import reconstructors
+import logging
 
 def train_reconstructors(bureaucrat:RunBureaucrat):
 	bureaucrat.check_these_tasks_were_run_successfully('TCT_2D_scan')
@@ -19,19 +18,16 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 	# Load data:
 	if len(bureaucrat.list_subruns_of_task('TCT_2D_scan')) != 1:
 		raise RuntimeError(f'Run {repr(bureaucrat.run_name)} located in "{bureaucrat.path_to_run_directory}" seems to be corrupted because I was expecting only a single subrun for the task "TCT_2D_scan" but it actually has {len(bureaucrat.list_subruns_of_task("TCT_2D_scan"))} subruns...')
+	logging.info(f'Loading data from {bureaucrat.run_name}')
 	flattened_1D_scan_subrun_bureaucrat = bureaucrat.list_subruns_of_task('TCT_2D_scan')[0]
-	parsed_from_waveforms = load_whole_dataframe(flattened_1D_scan_subrun_bureaucrat.path_to_directory_of_task('TCT_1D_scan')/'parsed_from_waveforms.sqlite')
+	connection = sqlite3.connect(flattened_1D_scan_subrun_bureaucrat.path_to_directory_of_task('TCT_1D_scan')/'parsed_from_waveforms.sqlite')
+	data = pandas.read_sql("SELECT n_position,n_trigger,n_channel,`Amplitude (V)` FROM dataframe_table WHERE n_pulse==1", connection)
+	data.set_index(['n_position','n_trigger','n_channel'], inplace=True)
 	
 	positions_data = pandas.read_pickle(bureaucrat.path_to_directory_of_task('TCT_2D_scan')/'positions.pickle')
 	positions_data.reset_index(['n_x','n_y'], drop=False, inplace=True)
 	for _ in {'x','y'}: # Remove offset so (0,0) is the center...
 		positions_data[f'{_} (m)'] -= positions_data[f'{_} (m)'].mean()
-	
-	data = parsed_from_waveforms
-	data.reset_index('n_waveform', drop=True, inplace=True)
-	
-	data = data.query('n_pulse==1')
-	# ~ data.reset_index('n_pulse', drop=True, inplace=True)
 	
 	pads_arrangement = pandas.read_csv(
 		bureaucrat.path_to_run_directory/'pads_arrangement.csv',
@@ -46,105 +42,109 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 	# Calculate some event-wise stuff:
 	data = data.unstack('n_channel')
 	for n_channel in data.columns.get_level_values('n_channel').drop_duplicates():
-		data[('Time from CH1 (s)',n_channel)] = data[('t_20 (s)',n_channel)] - data[('t_50 (s)',1)]
-		
-		data[('Total collected charge (V s)',n_channel)] = data[[('Collected charge (V s)',_) for _ in data.columns.get_level_values('n_channel').drop_duplicates()]].sum(axis=1)
-		data[('Charge shared fraction',n_channel)] = data[('Collected charge (V s)',n_channel)]/data[('Total collected charge (V s)',n_channel)]
-		
 		data[('Total amplitude (V)',n_channel)] = data[[('Amplitude (V)',_) for _ in data.columns.get_level_values('n_channel').drop_duplicates()]].sum(axis=1)
-		data[('Amplitude shared fraction',n_channel)] = data[('Amplitude (V)',n_channel)]/data[('Total amplitude (V)',n_channel)]
-	data = data.stack('n_channel') # Revert.
-	
-	# Calculate variables that could be used for the reconstruction:
-	data = data.unstack('n_channel')
-	variables = {}
-	for _ in {'Amplitude'}:
-		variables[f'f_{_.lower()}_horizontal'] = data[(f'{_} shared fraction',1)] + data[(f'{_} shared fraction',3)] - data[(f'{_} shared fraction',2)] - data[(f'{_} shared fraction',4)]
-		variables[f'f_{_.lower()}_vertical'] = data[(f'{_} shared fraction',1)] + data[(f'{_} shared fraction',2)] - data[(f'{_} shared fraction',3)] - data[(f'{_} shared fraction',4)]
-	for _,_2 in variables.items():
+		data[('ASF',n_channel)] = data[('Amplitude (V)',n_channel)]/data[('Total amplitude (V)',n_channel)]
+	# Calculate whatever will be fed into the ML reconstructors:
+	features = {}
+	for _ in {'ASF'}:
+		features[f'f_{_}_horizontal'] = data[(f'ASF',1)] + data[(f'ASF',3)] - data[(f'ASF',2)] - data[(f'ASF',4)]
+		features[f'f_{_}_vertical'] = data[(f'ASF',1)] + data[(f'ASF',2)] - data[(f'ASF',3)] - data[(f'ASF',4)]
+	for _,_2 in features.items():
 		_2.name = _
-	variables = pandas.concat([item for _,item in variables.items()], axis=1)
+	features = pandas.concat([item for _,item in features.items()], axis=1)
 	data = data.stack('n_channel') # Revert what I have done before.
-
-	variables = variables.merge(positions_data[POSITION_VARIABLES_NAMES], left_index=True, right_index=True)
 	
-	amplitude_data = data[['Amplitude (V)']].unstack('n_channel')
-	amplitude_data.columns = [' '.join([str(__) for __ in _]) for _ in amplitude_data.columns]
-	amplitude_data = amplitude_data.merge(positions_data[POSITION_VARIABLES_NAMES], left_index=True, right_index=True)
+	amplitude_shared_fraction = data[['ASF']].unstack('n_channel')
+	amplitude_shared_fraction.columns = [f'ASF {n_channel}' for n_channel in amplitude_shared_fraction.columns.get_level_values('n_channel')]
+	amplitude_shared_fraction = amplitude_shared_fraction + numpy.random.randn(*amplitude_shared_fraction.shape)/999999 # This has to be added because otherwise it fails due to some algebra error. I think that this is because the amplitude share data is so good quality (in terms of the correlations between the different channels) that then it fails to invert some matrix, or something like this. Adding some noise fixes this.
 	
-	amplitude_share_data = data[['Amplitude shared fraction']].unstack('n_channel')
-	amplitude_share_data.columns = [' '.join([str(__) for __ in _]) for _ in amplitude_share_data.columns]
-	amplitude_share_data = amplitude_share_data.merge(positions_data[POSITION_VARIABLES_NAMES], left_index=True, right_index=True)
+	amplitude = data[['Amplitude (V)']].unstack('n_channel')
+	amplitude.columns = [' '.join([str(__) for __ in _]) for _ in amplitude.columns]
 	
-	amplitude_share_data_for_discrete_MLE_algorithm = amplitude_share_data + numpy.random.randn(*amplitude_share_data.shape)/999999999 # This has to be added because otherwise it fails due to some algebra error. I think that this is because the amplitude share data is so good quality (in terms of the correlations between the different channels) that then it fails to invert some matrix, or something like this. Adding some noise fixes this.
+	features = pandas.concat([features,amplitude_shared_fraction,amplitude], axis=1)
 	
-	n_triggers_per_position = max(set(variables.index.get_level_values('n_trigger'))) + 1
+	positions_data, n_position_mapping = utils.resample_positions(positions_data,*[18 for _ in ['x','y']])
+	
+	# Update position data:
+	features = features.join(n_position_mapping, on='n_position')
+	features.reset_index('n_position', inplace=True, drop=True)
+	features.reset_index(inplace=True, drop=False)
+	features.set_index('n_position', inplace=True)
+	for n_position, df in features.groupby('n_position'):
+		features.loc[n_position,'n_trigger'] = numpy.arange(len(df))
+	features.reset_index(inplace=True, drop=False)
+	features.set_index(['n_position','n_trigger'], inplace=True)
+	
+	features = features.merge(positions_data[POSITION_VARIABLES_NAMES], left_index=True, right_index=True)
+	
+	n_channels = data.index.get_level_values('n_channel').drop_duplicates()
+	amplitude_data_for_reconstructors = features[[f'Amplitude (V) {n_channel}' for n_channel in n_channels] + POSITION_VARIABLES_NAMES]
+	amplitude_share_data_for_reconstructors = features[[f'ASF {n_channel}' for n_channel in n_channels] + POSITION_VARIABLES_NAMES]
 	RECONSTRUCTORS_TO_TEST = [
 		# ~ dict(
 			# ~ reconstructor = reconstructors.SVMPositionReconstructor(),
 			# ~ training_data = variables.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
 			# ~ testing_data = variables.query(f'n_trigger >= {int(n_triggers_per_position*1/3)}'),
 			# ~ features_variables_names = ['f_amplitude_horizontal','f_amplitude_vertical'],
-			# ~ reconstructor_name = 'SVR_reconstructor_with_f_amplitudes',
+			# ~ reconstructor_name = 'SVMPositionReconstructor_using_f_amplitude',
 		# ~ ),
 		# ~ dict(
 			# ~ reconstructor = reconstructors.SVMPositionReconstructor(),
 			# ~ training_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
 			# ~ testing_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
 			# ~ features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
-			# ~ reconstructor_name = 'SVR_reconstructor_with_amplitudes',
+			# ~ reconstructor_name = 'SVMPositionReconstructor_using_amplitude',
 		# ~ ),
 		# ~ dict(
 			# ~ reconstructor = reconstructors.DNNPositionReconstructor(),
 			# ~ training_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
 			# ~ testing_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
 			# ~ features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
-			# ~ reconstructor_name = 'DNN_reconstructor_with_amplitudes',
+			# ~ reconstructor_name = 'DNNPositionReconstructor_using_amplitude',
+		# ~ ),
+		# ~ dict(
+			# ~ reconstructor = reconstructors.LookupTablePositionReconstructor(),
+			# ~ training_data = amplitude_data_for_reconstructors,
+			# ~ testing_data = amplitude_data_for_reconstructors,
+			# ~ features_variables_names = sorted(set(amplitude_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
+			# ~ reconstructor_name = 'LookupTablePositionReconstructor_using_amplitude',
+			# ~ reconstructor_reconstruct_kwargs = dict(
+				# ~ batch_size = 11111,
+			# ~ ),
+		# ~ ),
+		# ~ dict(
+			# ~ reconstructor = reconstructors.DiscreteMLEPositionReconstructor(),
+			# ~ training_data = amplitude_data_for_reconstructors,
+			# ~ testing_data = amplitude_data_for_reconstructors,
+			# ~ features_variables_names = sorted(set(amplitude_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
+			# ~ reconstructor_name = 'DiscreteMLEPositionReconstructor_using_amplitude',
+			# ~ reconstructor_reconstruct_kwargs = dict(
+				# ~ batch_size = 11111,
+			# ~ ),
 		# ~ ),
 		dict(
 			reconstructor = reconstructors.LookupTablePositionReconstructor(),
-			training_data = amplitude_data,
-			testing_data = amplitude_data,
-			features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
-			reconstructor_name = 'lookup_table_reconstructor_with_amplitudes',
+			training_data = amplitude_share_data_for_reconstructors,
+			testing_data = amplitude_share_data_for_reconstructors,
+			features_variables_names = sorted(set(amplitude_share_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
+			reconstructor_name = 'LookupTablePositionReconstructor_using_ASF',
 			reconstructor_reconstruct_kwargs = dict(
 				batch_size = 11111,
 			),
 		),
 		dict(
 			reconstructor = reconstructors.DiscreteMLEPositionReconstructor(),
-			training_data = amplitude_data,
-			testing_data = amplitude_data,
-			features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
-			reconstructor_name = 'discrete_MLE_reconstructor_with_amplitudes',
-			reconstructor_reconstruct_kwargs = dict(
-				batch_size = 11111,
-			),
-		),
-		dict(
-			reconstructor = reconstructors.LookupTablePositionReconstructor(),
-			training_data = amplitude_share_data,
-			testing_data = amplitude_share_data,
-			features_variables_names = [f'Amplitude shared fraction {_}' for _ in [1,2,3,4]],
-			reconstructor_name = 'lookup_table_reconstructor_with_amplitudes_fraction',
-			reconstructor_reconstruct_kwargs = dict(
-				batch_size = 11111,
-			),
-		),
-		dict(
-			reconstructor = reconstructors.DiscreteMLEPositionReconstructor(),
-			training_data = amplitude_share_data_for_discrete_MLE_algorithm,
-			testing_data = amplitude_share_data_for_discrete_MLE_algorithm,
-			features_variables_names = [f'Amplitude shared fraction {_}' for _ in [1,2,3,4]],
-			reconstructor_name = 'discrete_MLE_reconstructor_with_amplitudes_fraction',
+			training_data = amplitude_share_data_for_reconstructors,
+			testing_data = amplitude_share_data_for_reconstructors,
+			features_variables_names = sorted(set(amplitude_share_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
+			reconstructor_name = 'DiscreteMLEPositionReconstructor_using_ASF',
 			reconstructor_reconstruct_kwargs = dict(
 				batch_size = 11111,
 			),
 		),
 	]
 	for stuff in RECONSTRUCTORS_TO_TEST:
-		print(f'{repr(stuff["reconstructor_name"])}...')
-		with bureaucrat.handle_task(stuff['reconstructor_name']) as employee:
+		with bureaucrat.handle_task(f"position_reconstructor_{stuff['reconstructor_name'].replace(' ','')}") as employee:
 			
 			training_data = stuff['training_data'].dropna()
 			testing_data = stuff['testing_data'].dropna()
@@ -177,17 +177,17 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 				)
 			
 			reconstructor = stuff['reconstructor']
-			print(f'Training...')
+			logging.info(f'Training {repr(stuff["reconstructor_name"])}...')
 			reconstructor.fit(
 				positions = training_data[POSITION_VARIABLES_NAMES],
 				features = training_data[stuff['features_variables_names']],
 			)
 			with open(employee.path_to_directory_of_my_task/'reconstructor.pickle', 'wb') as ofile:
 				pickle.dump(reconstructor, ofile, pickle.HIGHEST_PROTOCOL)
-			print(f'Reconstructing...')
+			logging.info(f'Reconstructing with {repr(stuff["reconstructor_name"])}...')
 			reconstructed = reconstructor.reconstruct(testing_data[stuff['features_variables_names']], **stuff['reconstructor_reconstruct_kwargs'])
 			
-			print('Analyzing and plotting...')
+			logging.info(f'Analyzing and plotting for {repr(stuff["reconstructor_name"])}...')
 			
 			reconstructed.columns = [f'{_} reco' for _ in reconstructed.columns]
 			
@@ -197,27 +197,27 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 			result.columns = [' '.join(_) for _ in result.columns]
 			result.rename(
 				columns = {
-					'reconstruction error (m) nanstd': 'Reconstruction uncertainty (m)',
-					'reconstruction error (m) nanmean': 'Reconstruction bias (m)',
+					'reconstruction error (m) nanstd': 'Reconstruction error std (m)',
+					'reconstruction error (m) nanmean': 'Reconstruction error mean (m)',
 				},
 				inplace = True,
 			)
 			
-			x_grid_size = numpy.absolute(numpy.diff(positions_data['x (m)'])).mean()
-			y_grid_size = numpy.absolute(numpy.diff(positions_data['y (m)'])).mean()
-			xy_grid_sampling_contribution_to_the_uncertainty = x_grid_size/12**.5 + y_grid_size/12**.5
-			result['Reconstruction uncertainty (m)'] = (result['Reconstruction uncertainty (m)']**2 + xy_grid_sampling_contribution_to_the_uncertainty**2)**.5
-			# ~ print(f'xy_grid_sampling_contribution_to_the_uncertainty = {xy_grid_sampling_contribution_to_the_uncertainty*1e6:.1f} µm')
+			x_grid_size = numpy.absolute(numpy.diff(sorted(set(positions_data['x (m)']))))[0]
+			y_grid_size = numpy.absolute(numpy.diff(sorted(set(positions_data['y (m)']))))[0]
+			xy_grid_sampling_contribution_to_the_uncertainty = ((x_grid_size/12**.5)**2 + (y_grid_size/12**.5)**2)**.5
+			result['Reconstruction uncertainty (m)'] = (result['Reconstruction error std (m)']**2 + xy_grid_sampling_contribution_to_the_uncertainty**2)**.5
 			
-			for col in ['Reconstruction uncertainty (m)','Reconstruction bias (m)']:
+			for col in ['Reconstruction uncertainty (m)','Reconstruction error mean (m)','Reconstruction error std (m)']:
 				fig = utils.plot_as_xy_heatmap(
 					z = result[col],
 					positions_data = positions_data,
-					title = f'{col} with {stuff["reconstructor_name"]}<br><sup>{bureaucrat.run_name}</sup>',
+					title = f'{col.replace(" (m)","")}<br><sup>Reconstructor: {stuff["reconstructor_name"]}, σ<sub>grid</sub>={xy_grid_sampling_contribution_to_the_uncertainty*1e6:.0f} µm</sup><br><sup>{bureaucrat.run_name}</sup>',
 					aspect = 'equal',
 					origin = 'lower',
 					zmin = 0,
 					zmax = 33e-6 if 'nanstd' in col else 33e-6 if 'nanmean' in col else None,
+					text_auto = True,
 				)
 				fig.write_html(
 					employee.path_to_directory_of_my_task/f'{col}_heatmap.html',
@@ -229,13 +229,12 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 					smoothing_sigma = 2,
 				)
 				fig.update_layout(
-					title = f'{col} with {stuff["reconstructor_name"]}<br><sup>{bureaucrat.run_name}</sup>',
+					title = f'{col.replace(" (m)","")}<br><sup>Reconstructor: {stuff["reconstructor_name"]}</sup><br><sup>{bureaucrat.run_name}</sup>',
 				)
 				fig.write_html(
 					employee.path_to_directory_of_my_task/f'{col}_contour.html',
 					include_plotlyjs = 'cdn',
 				)
-			
 			
 			z = result.copy()
 			z = z.merge(positions_data[['x (m)','y (m)','n_x','n_y']], left_index=True, right_index=True)
@@ -245,29 +244,38 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 				index = 'n_x',
 				columns = 'n_y',
 			)
-			xx,yy = numpy.meshgrid(sorted(set(positions_data['x (m)'])), sorted(set(positions_data['y (m)'])))
-			fig, ax = plt.subplots()
-			ax.quiver(
-				xx.T*1e6,
-				yy.T*1e6,
-				numpy.flip((z['x (m)'] - z['x (m) reco nanmean']).to_numpy(), 0),
-				numpy.flip((z['y (m)'] - z['y (m) reco nanmean']).to_numpy(), 0),
-				angles = 'xy', 
-				scale_units = 'xy', 
-				scale = 1e-6,
-			)
-			ax.set_aspect('equal')
-			ax.set_xlabel('x (µm)')
-			ax.set_ylabel('y (µm)')
-			plt.title(f'Reconstruction bias plot\n{bureaucrat.run_name}')
-			for fmt in {'png','pdf'}:
-				plt.savefig(employee.path_to_directory_of_my_task/f'vector_plot.{fmt}')
 			
-		print(f'Finished {repr(stuff["reconstructor_name"])}.')
+			# ~ xx,yy = numpy.meshgrid(sorted(set(positions_data['x (m)'])), sorted(set(positions_data['y (m)'])))
+			# ~ fig, ax = plt.subplots()
+			# ~ ax.quiver(
+				# ~ xx.T*1e6,
+				# ~ yy.T*1e6,
+				# ~ numpy.flip((z['x (m)'] - z['x (m) reco nanmean']).to_numpy(), 0),
+				# ~ numpy.flip((z['y (m)'] - z['y (m) reco nanmean']).to_numpy(), 0),
+				# ~ angles = 'xy', 
+				# ~ scale_units = 'xy', 
+				# ~ scale = 1e-6,
+			# ~ )
+			# ~ ax.set_aspect('equal')
+			# ~ ax.set_xlabel('x (µm)')
+			# ~ ax.set_ylabel('y (µm)')
+			# ~ plt.title(f'Reconstruction bias plot\n{bureaucrat.run_name}')
+			# ~ for fmt in {'png','pdf'}:
+				# ~ plt.savefig(employee.path_to_directory_of_my_task/f'vector_plot.{fmt}')
+		
+		logging.info(f'Finished with {repr(stuff["reconstructor_name"])}')
 
 if __name__ == '__main__':
 	import argparse
-	from grafica.plotly_utils.utils import set_my_template_as_default
+	from plotly_utils import set_my_template_as_default
+	import sys
+	
+	logging.basicConfig(
+		stream = sys.stderr, 
+		level = logging.DEBUG,
+		format = '%(asctime)s|%(levelname)s|%(message)s',
+		datefmt = '%Y-%m-%d %H:%M:%S',
+	)
 	
 	set_my_template_as_default()
 	
