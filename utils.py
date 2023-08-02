@@ -179,6 +179,81 @@ def plot_as_xy_contour(z:pandas.Series, positions_data:pandas.DataFrame, zmin=No
 	return fig
 
 def resample_positions(positions_data:pandas.DataFrame, new_n_x:int, new_n_y:int):
+	"""Produce a new table of positions with a larger sampling. Only works
+	for square 2D sampling. 
+	
+	Arguments
+	---------
+	positions_data: pandas.DataFrame
+		A data frame of the form
+		```
+		            n_x  n_y     x (m)     y (m)
+		n_position                              
+		0            12    0 -0.000144 -0.000278
+		1            13    0 -0.000133 -0.000278
+		2            14    0 -0.000122 -0.000278
+		3            15    0 -0.000111 -0.000278
+		4            16    0 -0.000100 -0.000278
+		...         ...  ...       ...       ...
+		2020         34   50  0.000100  0.000277
+		2021         35   50  0.000111  0.000277
+		2022         36   50  0.000122  0.000277
+		2023         37   50  0.000133  0.000277
+		2024         38   50  0.000144  0.000277
+		```
+		with the positions to be resampled.
+	new_n_x, new_n_y: int
+		New number of points in each coordinate.
+	
+	Returns
+	-------
+	resampled_positions_data: pandas.DataFrame
+		A data frame identical to `positions_data` with the new sampling,
+		for example:
+		```
+		            n_x  n_y     x (m)         y (m)
+		n_position                                  
+		0             1    0 -0.000111 -2.220000e-04
+		1             2    0  0.000000 -2.220000e-04
+		2             3    0  0.000111 -2.220000e-04
+		4             1    1 -0.000111 -1.110000e-04
+		5             2    1  0.000000 -1.110000e-04
+		6             3    1  0.000111 -1.110000e-04
+		3             0    1 -0.000222 -1.110000e-04
+		7             4    1  0.000222 -1.110000e-04
+		8             0    2 -0.000222 -5.421011e-20
+		9             1    2 -0.000111 -5.421011e-20
+		10            2    2  0.000000 -5.421011e-20
+		11            3    2  0.000111 -5.421011e-20
+		12            4    2  0.000222 -5.421011e-20
+		13            0    3 -0.000222  1.110000e-04
+		14            1    3 -0.000111  1.110000e-04
+		15            2    3  0.000000  1.110000e-04
+		16            3    3  0.000111  1.110000e-04
+		17            4    3  0.000222  1.110000e-04
+		18            1    4 -0.000111  2.220000e-04
+		19            2    4  0.000000  2.220000e-04
+		20            3    4  0.000111  2.220000e-04
+		```
+	n_position_mapping: pandas.Series
+		A series in which the index is the old `n_position` and the values
+		are the new `n_position`, for example:
+		```
+		n_position
+		0        0
+		1        0
+		2        0
+		3        0
+		4        0
+				..
+		2020    20
+		2021    20
+		2022    20
+		2023    20
+		2024    20
+		Name: n_position, Length: 2025, dtype: int64
+		```
+	"""
 	dxy = {}
 	xy_start = {}
 	xy_stop = {}
@@ -212,9 +287,7 @@ def resample_positions(positions_data:pandas.DataFrame, new_n_x:int, new_n_y:int
 			n_position_fixed += 1
 	
 	n_position_mapping = resampled_positions_data['n_position']
+	n_position_mapping.index.rename('n_position',inplace=True)
 	resampled_positions_data.set_index('n_position', inplace=True)
 	resampled_positions_data = resampled_positions_data.drop_duplicates()
 	return resampled_positions_data, n_position_mapping
-
-if __name__ == '__main__':
-	raise RuntimeError()
