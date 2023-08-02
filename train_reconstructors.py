@@ -35,9 +35,8 @@ def calculate_features(data:pandas.DataFrame, is_this_for_training:bool=False):
 	amplitude.columns = [' '.join([str(__) for __ in _]) for _ in amplitude.columns]
 	
 	return pandas.concat([features,amplitude_shared_fraction,amplitude], axis=1)
-	
 
-def train_reconstructors(bureaucrat:RunBureaucrat):
+def train_reconstructors(bureaucrat:RunBureaucrat, split_into_n_regions:int):
 	bureaucrat.check_these_tasks_were_run_successfully('TCT_2D_scan')
 	
 	POSITION_VARIABLES_NAMES = ['x (m)','y (m)']
@@ -66,7 +65,7 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 		},
 	)
 	
-	positions_data, n_position_mapping = utils.resample_positions(positions_data,*[18 for _ in ['x','y']])
+	positions_data, n_position_mapping = utils.resample_positions(positions_data,*[split_into_n_regions for _ in ['x','y']])
 	
 	features = calculate_features(data, is_this_for_training=True)
 	
@@ -86,47 +85,6 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 	amplitude_data_for_reconstructors = features[[f'Amplitude (V) {n_channel}' for n_channel in n_channels] + POSITION_VARIABLES_NAMES]
 	amplitude_share_data_for_reconstructors = features[[f'ASF {n_channel}' for n_channel in n_channels] + POSITION_VARIABLES_NAMES]
 	RECONSTRUCTORS_TO_TEST = [
-		# ~ dict(
-			# ~ reconstructor = reconstructors.SVMPositionReconstructor(),
-			# ~ training_data = variables.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
-			# ~ testing_data = variables.query(f'n_trigger >= {int(n_triggers_per_position*1/3)}'),
-			# ~ features_variables_names = ['f_amplitude_horizontal','f_amplitude_vertical'],
-			# ~ reconstructor_name = 'SVMPositionReconstructor_using_f_amplitude',
-		# ~ ),
-		# ~ dict(
-			# ~ reconstructor = reconstructors.SVMPositionReconstructor(),
-			# ~ training_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
-			# ~ testing_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
-			# ~ features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
-			# ~ reconstructor_name = 'SVMPositionReconstructor_using_amplitude',
-		# ~ ),
-		# ~ dict(
-			# ~ reconstructor = reconstructors.DNNPositionReconstructor(),
-			# ~ training_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
-			# ~ testing_data = amplitude_data.query(f'n_trigger < {int(n_triggers_per_position*2/3)}'),
-			# ~ features_variables_names = [f'Amplitude (V) {_}' for _ in [1,2,3,4]],
-			# ~ reconstructor_name = 'DNNPositionReconstructor_using_amplitude',
-		# ~ ),
-		# ~ dict(
-			# ~ reconstructor = reconstructors.LookupTablePositionReconstructor(),
-			# ~ training_data = amplitude_data_for_reconstructors,
-			# ~ testing_data = amplitude_data_for_reconstructors,
-			# ~ features_variables_names = sorted(set(amplitude_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
-			# ~ reconstructor_name = 'LookupTablePositionReconstructor_using_amplitude',
-			# ~ reconstructor_reconstruct_kwargs = dict(
-				# ~ batch_size = 11111,
-			# ~ ),
-		# ~ ),
-		# ~ dict(
-			# ~ reconstructor = reconstructors.DiscreteMLEPositionReconstructor(),
-			# ~ training_data = amplitude_data_for_reconstructors,
-			# ~ testing_data = amplitude_data_for_reconstructors,
-			# ~ features_variables_names = sorted(set(amplitude_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
-			# ~ reconstructor_name = 'DiscreteMLEPositionReconstructor_using_amplitude',
-			# ~ reconstructor_reconstruct_kwargs = dict(
-				# ~ batch_size = 11111,
-			# ~ ),
-		# ~ ),
 		dict(
 			reconstructor = reconstructors.LookupTablePositionReconstructor(),
 			training_data = amplitude_share_data_for_reconstructors,
@@ -149,7 +107,7 @@ def train_reconstructors(bureaucrat:RunBureaucrat):
 		),
 	]
 	for stuff in RECONSTRUCTORS_TO_TEST:
-		with bureaucrat.handle_task(f"position_reconstructor_{stuff['reconstructor_name'].replace(' ','')}") as employee:
+		with bureaucrat.handle_task(f"position_reconstructor_{stuff['reconstructor_name'].replace(' ','')}_{split_into_n_regions}x{split_into_n_regions}") as employee:
 			
 			training_data = stuff['training_data'].dropna()
 			testing_data = stuff['testing_data'].dropna()
@@ -278,7 +236,7 @@ if __name__ == '__main__':
 	logging.basicConfig(
 		stream = sys.stderr, 
 		level = logging.DEBUG,
-		format = '%(asctime)s|%(levelname)s|%(message)s',
+		format = '%(asctime)s|%(levelname)s|%(funcName)s|%(message)s',
 		datefmt = '%Y-%m-%d %H:%M:%S',
 	)
 	
@@ -295,5 +253,9 @@ if __name__ == '__main__':
 	
 	args = parser.parse_args()
 	bureaucrat = RunBureaucrat(Path(args.directory))
-	train_reconstructors(bureaucrat)
+	for n in [2,3,4,5,6,7,8,9,10]:
+		train_reconstructors(
+			bureaucrat,
+			split_into_n_regions = n
+		)
 
