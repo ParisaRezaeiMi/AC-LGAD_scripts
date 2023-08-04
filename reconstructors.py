@@ -19,7 +19,7 @@ class RSDPositionReconstructor:
 		positions: array like
 			An `n_events`×`2` array containing as columns the positions
 			in x and y.
-		something: array like
+		features: array like
 			An `n_events`×`n_features` array with e.g. the amplitude.
 		"""
 		for k,i in {'positions':positions,'features':features}.items():
