@@ -156,7 +156,7 @@ def train_DNN(dataloader, model, loss_fn, optimizer, device):
 		optimizer.zero_grad()
 
 class DNNPositionReconstructor(RSDPositionReconstructor):
-	def fit(self, positions, features):
+	def fit(self, positions, features, batch_size:int):
 		super().fit(positions=positions, features=features) # Performs some data curation and general stuff common to any machine learning method.
 		
 		device = (
@@ -183,7 +183,7 @@ class DNNPositionReconstructor(RSDPositionReconstructor):
 				dataloader = RSDDataLoader(
 					positions = scaled_positions,
 					features = scaled_features,
-					batch_size = int(len(scaled_positions)/11),
+					batch_size = batch_size,
 					shuffle = True,
 				),
 				model = self.dnn, 
@@ -192,7 +192,7 @@ class DNNPositionReconstructor(RSDPositionReconstructor):
 				device = self.device,
 			)
 	
-	def reconstruct(self, features):
+	def reconstruct(self, features, batch_size:int):
 		super().reconstruct(features=features)
 		
 		# Scale between 0 and 1:
@@ -203,17 +203,18 @@ class DNNPositionReconstructor(RSDPositionReconstructor):
 		dataloader = RSDDataLoader(
 			positions = pandas.DataFrame(index=features.index, data=numpy.zeros((len(features),len(self.positions_names))), columns=self.positions_names), # Create fake data just because this requires it, but it will not be used...
 			features = scaled_features,
-			batch_size = len(features),
+			batch_size = batch_size,
 		)
 		self.dnn.eval()
+		scaled_prediction = []
 		with torch.no_grad():
 			for X, y in dataloader:
 				X = X.to(self.device)
-				scaled_prediction = self.dnn(X)
+				scaled_prediction.append(self.dnn(X))
 		
 		reconstructed = pandas.DataFrame(
 			index = features.index,
-			data = scaled_prediction.numpy(),
+			data = numpy.concatenate([_.numpy() for _ in scaled_prediction]),
 			columns = self.positions_names,
 		)
 		for col in reconstructed:

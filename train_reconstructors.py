@@ -91,30 +91,35 @@ def train_reconstructors(bureaucrat:RunBureaucrat, split_into_n_regions:int):
 			testing_data = amplitude_share_data_for_reconstructors,
 			features_variables_names = sorted(set(amplitude_share_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
 			reconstructor_name = 'DNNPositionReconstructor_using_ASF',
+			reconstructor_fit_kwargs = dict(
+				batch_size = 11111,
+			),
 			reconstructor_reconstruct_kwargs = dict(
 				batch_size = 11111,
 			),
 		),
-		# ~ dict(
-			# ~ reconstructor = reconstructors.LookupTablePositionReconstructor(),
-			# ~ training_data = amplitude_share_data_for_reconstructors,
-			# ~ testing_data = amplitude_share_data_for_reconstructors,
-			# ~ features_variables_names = sorted(set(amplitude_share_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
-			# ~ reconstructor_name = 'LookupTablePositionReconstructor_using_ASF',
-			# ~ reconstructor_reconstruct_kwargs = dict(
-				# ~ batch_size = 11111,
-			# ~ ),
-		# ~ ),
-		# ~ dict(
-			# ~ reconstructor = reconstructors.DiscreteMLEPositionReconstructor(),
-			# ~ training_data = amplitude_share_data_for_reconstructors,
-			# ~ testing_data = amplitude_share_data_for_reconstructors,
-			# ~ features_variables_names = sorted(set(amplitude_share_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
-			# ~ reconstructor_name = 'DiscreteMLEPositionReconstructor_using_ASF',
-			# ~ reconstructor_reconstruct_kwargs = dict(
-				# ~ batch_size = 11111,
-			# ~ ),
-		# ~ ),
+		dict(
+			reconstructor = reconstructors.LookupTablePositionReconstructor(),
+			training_data = amplitude_share_data_for_reconstructors,
+			testing_data = amplitude_share_data_for_reconstructors,
+			features_variables_names = sorted(set(amplitude_share_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
+			reconstructor_name = 'LookupTablePositionReconstructor_using_ASF',
+			reconstructor_fit_kwargs = dict(),
+			reconstructor_reconstruct_kwargs = dict(
+				batch_size = 11111,
+			),
+		),
+		dict(
+			reconstructor = reconstructors.DiscreteMLEPositionReconstructor(),
+			training_data = amplitude_share_data_for_reconstructors,
+			testing_data = amplitude_share_data_for_reconstructors,
+			features_variables_names = sorted(set(amplitude_share_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
+			reconstructor_name = 'DiscreteMLEPositionReconstructor_using_ASF',
+			reconstructor_fit_kwargs = dict(),
+			reconstructor_reconstruct_kwargs = dict(
+				batch_size = 11111,
+			),
+		),
 	]
 	for stuff in RECONSTRUCTORS_TO_TEST:
 		with bureaucrat.handle_task(f"position_reconstructor_{stuff['reconstructor_name'].replace(' ','')}_{split_into_n_regions}x{split_into_n_regions}") as employee:
@@ -154,6 +159,7 @@ def train_reconstructors(bureaucrat:RunBureaucrat, split_into_n_regions:int):
 			reconstructor.fit(
 				positions = training_data[POSITION_VARIABLES_NAMES],
 				features = training_data[stuff['features_variables_names']],
+				**stuff['reconstructor_fit_kwargs'],
 			)
 			with open(employee.path_to_directory_of_my_task/'reconstructor.pickle', 'wb') as ofile:
 				pickle.dump(reconstructor, ofile, pickle.HIGHEST_PROTOCOL)
@@ -264,7 +270,7 @@ if __name__ == '__main__':
 	
 	args = parser.parse_args()
 	bureaucrat = RunBureaucrat(Path(args.directory))
-	for n in [2,3,6,11,12,13,14,15,16,17,18,19,22]:
+	for n in [2,3,6,8,11,12,13,14,15,16,17,18,19,22,33]:
 		train_reconstructors(
 			bureaucrat,
 			split_into_n_regions = n
