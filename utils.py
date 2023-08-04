@@ -25,9 +25,21 @@ def filter_nan_gaussian_david(arr, sigma):
     gauss[numpy.isnan(arr)] = numpy.nan
     return gauss
 
-def save_dataframe(df, name:str, location:Path):
-	for extension,method in {'pickle':df.to_pickle,'csv':df.to_csv}.items():
-		method(location/f'{name}.{extension}')
+def save_dataframe(df, name:str, location:Path, formats:list):
+	FORMATS = {
+		'pickle': dict(func=df.to_pickle, extension='pickle'),
+		'csv': dict(func=df.to_csv, extension='csv'),
+		'feather': dict(func=None, extension='feather'),
+	}
+	for fmt in formats:
+		if fmt not in FORMATS:
+			raise ValueError(f'Cannot save data frame in format {repr(fmt)}')
+		extension = FORMATS[fmt]['extension']
+		method = FORMATS[fmt]['func']
+		if fmt == 'feather':
+			df.reset_index(drop=False).to_feather(location/f'{name}.{extension}')
+		else:
+			method(location/f'{name}.{extension}')
 
 def plot_as_xy_heatmap(z:pandas.Series, positions_data:pandas.DataFrame, **plotly_kwargs):
 	"""Produce a heatmap using plotly of some given quantity as a function

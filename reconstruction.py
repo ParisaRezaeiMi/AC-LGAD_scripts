@@ -94,6 +94,7 @@ def reconstruct(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
 			reconstructed,
 			name = 'reconstructed_positions',
 			location = employee.path_to_directory_of_my_task,
+			formats = ['pickle','feather'],
 		)
 		logging.info(f'Finished reconstruction of {bureaucrat.run_name}.')
 
@@ -136,6 +137,13 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 		reconstructor_info = json.load(ifile)
 	
 	with bureaucrat.handle_task(f'{reconstruction_task_name}_analysis') as employee:
+		logging.info('Saving reconstruction error...')
+		utils.save_dataframe(
+			df = reconstruction_error,
+			name = 'reconstruction_error',
+			location = employee.path_to_directory_of_my_task,
+			formats = ['feather','pickle'],
+		)
 		logging.info('Producing and saving plots...')
 		for col in {'Reconstruction error std (m)','Reconstruction error mean (m)'}:
 			title = f'{col.replace(" (m)","")}<br><sup>{bureaucrat.run_name}</sup>'
