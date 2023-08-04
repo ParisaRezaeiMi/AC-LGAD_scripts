@@ -10,6 +10,7 @@ import sqlite3
 import json
 from train_reconstructors import calculate_features
 import matplotlib.pyplot as plt
+import plotly.express as px
 
 POSITION_VARIABLES_NAMES = ['x (m)','y (m)']
 
@@ -145,9 +146,9 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 			formats = ['feather','pickle'],
 		)
 		logging.info('Producing and saving plots...')
+		subtitle_lines = [f'Reconstructor: {reconstructor_info["reconstructor_name"]}',f'Training data: {Path(reconstructor_info["path_to_reconstructor_pickle"]).parent.parent.name}']
 		for col in {'Reconstruction error std (m)','Reconstruction error mean (m)'}:
 			title = f'{col.replace(" (m)","")}<br><sup>{bureaucrat.run_name}</sup>'
-			subtitle_lines = [f'Reconstructor: {reconstructor_info["reconstructor_name"]}',f'Training data: {Path(reconstructor_info["path_to_reconstructor_pickle"]).parent.parent.name}']
 			title += '<br><sup>' + '</sup><br><sup>'.join(subtitle_lines) + '</sup>'
 			fig = utils.plot_as_xy_heatmap(
 				z = result[col],
@@ -156,10 +157,7 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 				aspect = 'equal',
 				origin = 'lower',
 				text_auto = True,
-				# ~ zmin = 0,
-				# ~ zmax = 33e-6
 			)
-			fig.update_layout(margin=dict(l=20, r=20, t=60, b=20))
 			fig.write_html(
 				employee.path_to_directory_of_my_task/f'{col}_heatmap.html',
 				include_plotlyjs = 'cdn',
@@ -177,37 +175,48 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 				include_plotlyjs = 'cdn',
 			)
 			
-			# Quiver plot with biases ---
-			reconstructed_average = reconstructed.groupby('n_position').agg(numpy.nanmean)
-			reconstructed_average.rename(columns={'x (m)': 'x (m) reconstructed', 'y (m)': 'y (m) reconstructed'}, inplace=True)
-			z = reconstructed_average.merge(positions_data[['n_x','n_y','x (m)','y (m)']], left_index=True, right_index=True)
-			z.set_index(['n_x','n_y'], inplace=True)
-			z = z.unstack('n_x')
-			xx,yy = numpy.meshgrid(sorted(set(positions_data['x (m)'])), sorted(set(positions_data['y (m)'])))
-			fig, ax = plt.subplots()
-			ax.quiver(
-				xx*1e6,
-				yy*1e6,
-				z['x (m) reconstructed'] - xx,
-				z['y (m) reconstructed'] - yy,
-				angles = 'xy', 
-				scale_units = 'xy', 
-				scale = 1e-6,
-				edgecolor = 'blue',
-			)
-			ax.scatter(
-				x = positions_data['x (m)']*1e6,
-				y = positions_data['y (m)']*1e6,
-				c = 'red',
-				s = 1,
-			)
-			ax.set_aspect('equal')
-			ax.set_xlabel('x (µm)')
-			ax.set_ylabel('y (µm)')
-			plt.title(f'Reconstruction bias plot\n{bureaucrat.run_name}')
-			for fmt in {'pdf'}:
-				plt.savefig(employee.path_to_directory_of_my_task/f'vector_plot.{fmt}')
-			
+		# Quiver plot with biases ---
+		reconstructed_average = reconstructed.groupby('n_position').agg(numpy.nanmean)
+		reconstructed_average.rename(columns={'x (m)': 'x (m) reconstructed', 'y (m)': 'y (m) reconstructed'}, inplace=True)
+		z = reconstructed_average.merge(positions_data[['n_x','n_y','x (m)','y (m)']], left_index=True, right_index=True)
+		z.set_index(['n_x','n_y'], inplace=True)
+		z = z.unstack('n_x')
+		xx,yy = numpy.meshgrid(sorted(set(positions_data['x (m)'])), sorted(set(positions_data['y (m)'])))
+		fig, ax = plt.subplots()
+		ax.quiver(
+			xx*1e6,
+			yy*1e6,
+			z['x (m) reconstructed'] - xx,
+			z['y (m) reconstructed'] - yy,
+			angles = 'xy', 
+			scale_units = 'xy', 
+			scale = 1e-6,
+			edgecolor = 'blue',
+		)
+		ax.scatter(
+			x = positions_data['x (m)']*1e6,
+			y = positions_data['y (m)']*1e6,
+			c = 'red',
+			s = 1,
+		)
+		ax.set_aspect('equal')
+		ax.set_xlabel('x (µm)')
+		ax.set_ylabel('y (µm)')
+		plt.title(f'Reconstruction bias plot\n{bureaucrat.run_name}')
+		for fmt in {'pdf'}:
+			plt.savefig(employee.path_to_directory_of_my_task/f'reconstruction_error_average_quiver.{fmt}')
+		
+		fig = px.ecdf(
+			title = f'Reconstruction error distribution<br><sup>{bureaucrat.run_name}</sup>' + '<br><sup>' + '</sup><br><sup>'.join(subtitle_lines) + '</sup>',
+			data_frame = reconstruction_error.to_frame().sample(n=5555).reset_index(drop=False),
+			x = 'Reconstruction error (m)',
+			marginal = 'histogram',
+		)
+		fig.write_html(
+			employee.path_to_directory_of_my_task/'reconstruction_error_distribution.html',
+			include_plotlyjs = 'cdn',
+		)
+		
 		logging.info(f'Finished with {bureaucrat.run_name}.')
 
 def reconstruct_and_analyze(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
