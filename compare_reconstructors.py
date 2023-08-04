@@ -38,12 +38,18 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 	
 	def q99(x):
 		return numpy.quantile(x, .99)
-	statistics = reconstruction_errors.groupby('reconstructor_name').agg([numpy.nanmean,numpy.nanstd,q99])
+	def q999(x):
+		return numpy.quantile(x, .999)
+	def q100(x):
+		return numpy.quantile(x, 1)
+	statistics = reconstruction_errors.groupby('reconstructor_name').agg([numpy.nanmean,numpy.nanstd,q99,q100,q999])
 	statistics.rename(
 		columns = {
 			'nanstd': 'Reconstruction error std (m)',
 			'nanmean': 'Reconstruction error mean (m)',
 			'q99': 'Reconstruction error q99 (m)',
+			'q100': 'Reconstruction error q100 (m)',
+			'q999': 'Reconstruction error q999 (m)',
 		},
 		inplace = True,
 	)
@@ -51,8 +57,13 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 	with bureaucrat.handle_task('compare_position_reconstrucitons') as employee:
 		
 		DUT_PITCH = 500e-6
+		binary_readout_text = f'{DUT_PITCH*1e6:.0f}×{DUT_PITCH*1e6:.0f} µm<sup>2</sup> binary uncertainty = {DUT_PITCH*(2/12)**.5*1e6:.0f} µm'
 		LABELS_FOR_PLOTS = {
 			'reconstructor_type': 'Reconstructor',
+			'Reconstruction error q99 (m)': 'Reconstruction error q<sub>99%</sub> (m)',
+			'Reconstruction error q999 (m)': 'Reconstruction error q<sub>99.9%</sub> (m)',
+			'Reconstruction error q100 (m)': 'Reconstruction error q<sub>100%</sub> (m)',
+			'reconstructor_x_grid': 'N reconstructor grid (N×N)',
 		}
 		fig = px.ecdf(
 			reconstruction_errors.to_frame().sample(n=5555).merge(reconstructors_info,left_index=True, right_index=True).reset_index(drop=False).sort_values(['reconstructor_type','reconstructor_x_grid']),
@@ -64,7 +75,7 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 		)
 		fig.add_vline(
 				x = DUT_PITCH*(2/12)**.5,
-				annotation_text = f'Binary readout uncertainty = {DUT_PITCH*(2/12)**.5*1e6:.0f} µm',
+				annotation_text = binary_readout_text,
 				line_dash = 'dash',
 				annotation_textangle = -90,
 			)
@@ -85,13 +96,39 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 			)
 			fig.add_hline(
 				y = DUT_PITCH*(2/12)**.5,
-				annotation_text = f'Binary readout uncertainty = {DUT_PITCH*(2/12)**.5*1e6:.0f} µm',
+				annotation_text = binary_readout_text,
 				line_dash = 'dash',
 			)
 			fig.write_html(
 				employee.path_to_directory_of_my_task/f'{col}.html',
 				include_plotlyjs = 'cdn',
 			)
+		
+		quantiles = reconstruction_errors.groupby('reconstructor_name').quantile([.5,.95,.99])
+		quantiles = quantiles.to_frame()
+		quantiles.reset_index(level=-1,drop=False,inplace=True)
+		quantiles.columns = ['quantile (%)'] + list(quantiles.columns[1:])
+		quantiles['quantile (%)'] *= 100
+		fig = px.line(
+			quantiles.merge(reconstructors_info,left_index=True, right_index=True).reset_index(drop=False).sort_values(['reconstructor_type','reconstructor_x_grid','quantile (%)']),
+			title = f'Reconstruction algorithms comparison<br><sup>{bureaucrat.run_name}</sup>',
+			x = 'reconstructor_x_grid',
+			y = 'Reconstruction error (m)',
+			color = 'reconstructor_type',
+			markers = True,
+			labels = LABELS_FOR_PLOTS,
+			facet_col = 'quantile (%)',
+		)
+		fig.add_hline(
+			y = DUT_PITCH*(2/12)**.5,
+			annotation_text = binary_readout_text,
+			line_dash = 'dash',
+		)
+		fig.write_html(
+			employee.path_to_directory_of_my_task/f'reconstructors_comparison.html',
+			include_plotlyjs = 'cdn',
+		)
+		
 
 if __name__ == '__main__':
 	import argparse
