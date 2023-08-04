@@ -86,25 +86,35 @@ def train_reconstructors(bureaucrat:RunBureaucrat, split_into_n_regions:int):
 	amplitude_share_data_for_reconstructors = features[[f'ASF {n_channel}' for n_channel in n_channels] + POSITION_VARIABLES_NAMES]
 	RECONSTRUCTORS_TO_TEST = [
 		dict(
-			reconstructor = reconstructors.LookupTablePositionReconstructor(),
+			reconstructor = reconstructors.DNNPositionReconstructor(),
 			training_data = amplitude_share_data_for_reconstructors,
 			testing_data = amplitude_share_data_for_reconstructors,
 			features_variables_names = sorted(set(amplitude_share_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
-			reconstructor_name = 'LookupTablePositionReconstructor_using_ASF',
+			reconstructor_name = 'DNNPositionReconstructor_using_ASF',
 			reconstructor_reconstruct_kwargs = dict(
 				batch_size = 11111,
 			),
 		),
-		dict(
-			reconstructor = reconstructors.DiscreteMLEPositionReconstructor(),
-			training_data = amplitude_share_data_for_reconstructors,
-			testing_data = amplitude_share_data_for_reconstructors,
-			features_variables_names = sorted(set(amplitude_share_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
-			reconstructor_name = 'DiscreteMLEPositionReconstructor_using_ASF',
-			reconstructor_reconstruct_kwargs = dict(
-				batch_size = 11111,
-			),
-		),
+		# ~ dict(
+			# ~ reconstructor = reconstructors.LookupTablePositionReconstructor(),
+			# ~ training_data = amplitude_share_data_for_reconstructors,
+			# ~ testing_data = amplitude_share_data_for_reconstructors,
+			# ~ features_variables_names = sorted(set(amplitude_share_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
+			# ~ reconstructor_name = 'LookupTablePositionReconstructor_using_ASF',
+			# ~ reconstructor_reconstruct_kwargs = dict(
+				# ~ batch_size = 11111,
+			# ~ ),
+		# ~ ),
+		# ~ dict(
+			# ~ reconstructor = reconstructors.DiscreteMLEPositionReconstructor(),
+			# ~ training_data = amplitude_share_data_for_reconstructors,
+			# ~ testing_data = amplitude_share_data_for_reconstructors,
+			# ~ features_variables_names = sorted(set(amplitude_share_data_for_reconstructors.columns).difference(POSITION_VARIABLES_NAMES)),
+			# ~ reconstructor_name = 'DiscreteMLEPositionReconstructor_using_ASF',
+			# ~ reconstructor_reconstruct_kwargs = dict(
+				# ~ batch_size = 11111,
+			# ~ ),
+		# ~ ),
 	]
 	for stuff in RECONSTRUCTORS_TO_TEST:
 		with bureaucrat.handle_task(f"position_reconstructor_{stuff['reconstructor_name'].replace(' ','')}_{split_into_n_regions}x{split_into_n_regions}") as employee:
@@ -147,66 +157,67 @@ def train_reconstructors(bureaucrat:RunBureaucrat, split_into_n_regions:int):
 			)
 			with open(employee.path_to_directory_of_my_task/'reconstructor.pickle', 'wb') as ofile:
 				pickle.dump(reconstructor, ofile, pickle.HIGHEST_PROTOCOL)
-			logging.info(f'Reconstructing with {repr(stuff["reconstructor_name"])}...')
-			reconstructed = reconstructor.reconstruct(testing_data[stuff['features_variables_names']], **stuff['reconstructor_reconstruct_kwargs'])
+
+			# ~ logging.info(f'Reconstructing with {repr(stuff["reconstructor_name"])}...')
+			# ~ reconstructed = reconstructor.reconstruct(testing_data[stuff['features_variables_names']], **stuff['reconstructor_reconstruct_kwargs'])
 			
-			logging.info(f'Analyzing and plotting for {repr(stuff["reconstructor_name"])}...')
+			# ~ logging.info(f'Analyzing and plotting for {repr(stuff["reconstructor_name"])}...')
 			
-			reconstructed.columns = [f'{_} reco' for _ in reconstructed.columns]
+			# ~ reconstructed.columns = [f'{_} reco' for _ in reconstructed.columns]
 			
-			reconstructed['reconstruction error (m)'] = sum([(reconstructed[f'{_} reco']-positions_data[_])**2 for _ in POSITION_VARIABLES_NAMES])**.5
+			# ~ reconstructed['reconstruction error (m)'] = sum([(reconstructed[f'{_} reco']-positions_data[_])**2 for _ in POSITION_VARIABLES_NAMES])**.5
 			
-			result = reconstructed.groupby('n_position').agg([numpy.nanmean,numpy.nanstd])
-			result.columns = [' '.join(_) for _ in result.columns]
-			result.rename(
-				columns = {
-					'reconstruction error (m) nanstd': 'Reconstruction error std (m)',
-					'reconstruction error (m) nanmean': 'Reconstruction error mean (m)',
-				},
-				inplace = True,
-			)
+			# ~ result = reconstructed.groupby('n_position').agg([numpy.nanmean,numpy.nanstd])
+			# ~ result.columns = [' '.join(_) for _ in result.columns]
+			# ~ result.rename(
+				# ~ columns = {
+					# ~ 'reconstruction error (m) nanstd': 'Reconstruction error std (m)',
+					# ~ 'reconstruction error (m) nanmean': 'Reconstruction error mean (m)',
+				# ~ },
+				# ~ inplace = True,
+			# ~ )
 			
-			x_grid_size = numpy.absolute(numpy.diff(sorted(set(positions_data['x (m)']))))[0]
-			y_grid_size = numpy.absolute(numpy.diff(sorted(set(positions_data['y (m)']))))[0]
-			xy_grid_sampling_contribution_to_the_uncertainty = ((x_grid_size/12**.5)**2 + (y_grid_size/12**.5)**2)**.5
-			result['Reconstruction uncertainty (m)'] = (result['Reconstruction error std (m)']**2 + xy_grid_sampling_contribution_to_the_uncertainty**2)**.5
+			# ~ x_grid_size = numpy.absolute(numpy.diff(sorted(set(positions_data['x (m)']))))[0]
+			# ~ y_grid_size = numpy.absolute(numpy.diff(sorted(set(positions_data['y (m)']))))[0]
+			# ~ xy_grid_sampling_contribution_to_the_uncertainty = ((x_grid_size/12**.5)**2 + (y_grid_size/12**.5)**2)**.5
+			# ~ result['Reconstruction uncertainty (m)'] = (result['Reconstruction error std (m)']**2 + xy_grid_sampling_contribution_to_the_uncertainty**2)**.5
 			
-			for col in ['Reconstruction uncertainty (m)','Reconstruction error mean (m)','Reconstruction error std (m)']:
-				fig = utils.plot_as_xy_heatmap(
-					z = result[col],
-					positions_data = positions_data,
-					title = f'{col.replace(" (m)","")}<br><sup>Reconstructor: {stuff["reconstructor_name"]}, σ<sub>grid</sub>={xy_grid_sampling_contribution_to_the_uncertainty*1e6:.0f} µm</sup><br><sup>{bureaucrat.run_name}</sup>',
-					aspect = 'equal',
-					origin = 'lower',
-					zmin = 0,
-					zmax = 33e-6 if 'nanstd' in col else 33e-6 if 'nanmean' in col else None,
-					text_auto = True,
-				)
-				fig.write_html(
-					employee.path_to_directory_of_my_task/f'{col}_heatmap.html',
-					include_plotlyjs = 'cdn',
-				)
-				fig = utils.plot_as_xy_contour(
-					z = result[col],
-					positions_data = positions_data,
-					smoothing_sigma = 2,
-				)
-				fig.update_layout(
-					title = f'{col.replace(" (m)","")}<br><sup>Reconstructor: {stuff["reconstructor_name"]}</sup><br><sup>{bureaucrat.run_name}</sup>',
-				)
-				fig.write_html(
-					employee.path_to_directory_of_my_task/f'{col}_contour.html',
-					include_plotlyjs = 'cdn',
-				)
+			# ~ for col in ['Reconstruction uncertainty (m)','Reconstruction error mean (m)','Reconstruction error std (m)']:
+				# ~ fig = utils.plot_as_xy_heatmap(
+					# ~ z = result[col],
+					# ~ positions_data = positions_data,
+					# ~ title = f'{col.replace(" (m)","")}<br><sup>Reconstructor: {stuff["reconstructor_name"]}, σ<sub>grid</sub>={xy_grid_sampling_contribution_to_the_uncertainty*1e6:.0f} µm</sup><br><sup>{bureaucrat.run_name}</sup>',
+					# ~ aspect = 'equal',
+					# ~ origin = 'lower',
+					# ~ zmin = 0,
+					# ~ zmax = 33e-6 if 'nanstd' in col else 33e-6 if 'nanmean' in col else None,
+					# ~ text_auto = True,
+				# ~ )
+				# ~ fig.write_html(
+					# ~ employee.path_to_directory_of_my_task/f'{col}_heatmap.html',
+					# ~ include_plotlyjs = 'cdn',
+				# ~ )
+				# ~ fig = utils.plot_as_xy_contour(
+					# ~ z = result[col],
+					# ~ positions_data = positions_data,
+					# ~ smoothing_sigma = 2,
+				# ~ )
+				# ~ fig.update_layout(
+					# ~ title = f'{col.replace(" (m)","")}<br><sup>Reconstructor: {stuff["reconstructor_name"]}</sup><br><sup>{bureaucrat.run_name}</sup>',
+				# ~ )
+				# ~ fig.write_html(
+					# ~ employee.path_to_directory_of_my_task/f'{col}_contour.html',
+					# ~ include_plotlyjs = 'cdn',
+				# ~ )
 			
-			z = result.copy()
-			z = z.merge(positions_data[['x (m)','y (m)','n_x','n_y']], left_index=True, right_index=True)
-			z = pandas.pivot_table(
-				data = z,
-				values = z.columns,
-				index = 'n_x',
-				columns = 'n_y',
-			)
+			# ~ z = result.copy()
+			# ~ z = z.merge(positions_data[['x (m)','y (m)','n_x','n_y']], left_index=True, right_index=True)
+			# ~ z = pandas.pivot_table(
+				# ~ data = z,
+				# ~ values = z.columns,
+				# ~ index = 'n_x',
+				# ~ columns = 'n_y',
+			# ~ )
 			
 			# ~ xx,yy = numpy.meshgrid(sorted(set(positions_data['x (m)'])), sorted(set(positions_data['y (m)'])))
 			# ~ fig, ax = plt.subplots()
@@ -253,7 +264,7 @@ if __name__ == '__main__':
 	
 	args = parser.parse_args()
 	bureaucrat = RunBureaucrat(Path(args.directory))
-	for n in [2,3,4,5,6,7,8,9,10]:
+	for n in [2,3,6,11,12,13,14,15,16,17,18,19,22]:
 		train_reconstructors(
 			bureaucrat,
 			split_into_n_regions = n

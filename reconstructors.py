@@ -9,6 +9,7 @@ from torchvision.transforms import ToTensor
 from torch.utils.data import Dataset
 from scipy.stats import gaussian_kde
 import warnings
+import logging
 
 class RSDPositionReconstructor:
 	def fit(self, positions, features):
@@ -92,59 +93,71 @@ class SVMPositionReconstructor(RSDPositionReconstructor):
 			reconstructed[col] = self.scalers[col].inverse_transform(reconstructed[[col]])
 		return reconstructed
 
-class DNNPositionReconstructor(RSDPositionReconstructor):
-	class RSDDataLoader(Dataset):
-		def __init__(self, positions:pandas.DataFrame, features:pandas.DataFrame, transform=None, target_transform=None, batch_size:int=1, shuffle:bool=False):
-			df = pandas.concat([positions,features], axis=1)
-			if shuffle == True:
-				df = df.sample(frac=1)
-			
-			self.positions = torch.tensor(df[positions.columns].values).to(torch.float32)
-			self.features = torch.tensor(df[features.columns].values).to(torch.float32)
-			
-			self.transform = transform
-			self.target_transform = target_transform
-			
-			self.batch_size = batch_size
+class NeuralNetwork(nn.Module):
+	def __init__(self, n_inputs:int, n_outputs:int):
+		super().__init__()
+		self.flatten = nn.Flatten()
+		self.linear_relu_stack = nn.Sequential(
+			nn.Linear(n_inputs, 11),
+			nn.ReLU(),
+			nn.Linear(11, 11),
+			nn.ReLU(),
+			nn.Linear(11, n_outputs)
+		)
 
-		def __len__(self):
-			return -(len(self.positions)//-self.batch_size)
+	def forward(self, x):
+		x = self.flatten(x)
+		logits = self.linear_relu_stack(x)
+		return logits
+
+class RSDDataLoader(Dataset):
+	def __init__(self, positions:pandas.DataFrame, features:pandas.DataFrame, transform=None, target_transform=None, batch_size:int=1, shuffle:bool=False):
+		df = pandas.concat([positions,features], axis=1)
+		if shuffle == True:
+			df = df.sample(frac=1)
 		
-		def __getitem__(self, idx):
-			bs = self.batch_size
-			if (idx+1)*bs < len(self.positions):
-				position = self.positions[idx*bs:(idx+1)*bs,:]
-				features = self.features[idx*bs:(idx+1)*bs,:]
-			elif idx*bs < len(self.positions):
-				position = self.positions[idx*bs:,:]
-				features = self.features[idx*bs:,:]
-			else:
-				raise StopIteration()
-			if self.transform:
-				position = self.transform(position)
-			if self.target_transform:
-				features = self.target_transform(features)
-			return features, position
-	
-	def __init__(self):
-		class NeuralNetwork(nn.Module):
-			def __init__(self):
-				super().__init__()
-				self.flatten = nn.Flatten()
-				self.linear_relu_stack = nn.Sequential(
-					nn.Linear(4, 11),
-					nn.ReLU(),
-					nn.Linear(11, 11),
-					nn.ReLU(),
-					nn.Linear(11, 11),
-					nn.ReLU(),
-					nn.Linear(11, 2)
-				)
+		self.positions = torch.tensor(df[positions.columns].values).to(torch.float32)
+		self.features = torch.tensor(df[features.columns].values).to(torch.float32)
+		
+		self.transform = transform
+		self.target_transform = target_transform
+		
+		self.batch_size = batch_size
 
-			def forward(self, x):
-				x = self.flatten(x)
-				logits = self.linear_relu_stack(x)
-				return logits
+	def __len__(self):
+		return -(len(self.positions)//-self.batch_size)
+	
+	def __getitem__(self, idx):
+		bs = self.batch_size
+		if (idx+1)*bs < len(self.positions):
+			position = self.positions[idx*bs:(idx+1)*bs,:]
+			features = self.features[idx*bs:(idx+1)*bs,:]
+		elif idx*bs < len(self.positions):
+			position = self.positions[idx*bs:,:]
+			features = self.features[idx*bs:,:]
+		else:
+			raise StopIteration()
+		if self.transform:
+			position = self.transform(position)
+		if self.target_transform:
+			features = self.target_transform(features)
+		return features, position
+
+def train_DNN(dataloader, model, loss_fn, optimizer, device):
+	model.train()
+	for batch, (X, y) in enumerate(dataloader):
+		X, y = X.to(device), y.to(device)
+		# Compute prediction error
+		pred = model(X)
+		loss = loss_fn(pred, y)
+		# Backpropagation
+		loss.backward()
+		optimizer.step()
+		optimizer.zero_grad()
+
+class DNNPositionReconstructor(RSDPositionReconstructor):
+	def fit(self, positions, features):
+		super().fit(positions=positions, features=features) # Performs some data curation and general stuff common to any machine learning method.
 		
 		device = (
 			"cuda"
@@ -155,26 +168,7 @@ class DNNPositionReconstructor(RSDPositionReconstructor):
 		)
 		self.device = device
 		
-		self.dnn = NeuralNetwork().to(device)
-		
-	def fit(self, positions, features):
-		def train(dataloader, model, loss_fn, optimizer):
-			model.train()
-			for batch, (X, y) in enumerate(dataloader):
-				X, y = X.to(self.device), y.to(self.device)
-				
-				# Compute prediction error
-				pred = model(X)
-				loss = loss_fn(pred, y)
-
-				# Backpropagation
-				loss.backward()
-				optimizer.step()
-				optimizer.zero_grad()
-				
-				# ~ print(f"loss: {loss.item():>7f}  [batch: {batch}/{len(dataloader)-1}]")
-		
-		super().fit(positions=positions, features=features) # Performs some data curation and general stuff common to any machine learning method.
+		self.dnn = NeuralNetwork(n_inputs = len(features.columns), n_outputs=len(positions.columns)).to(device)
 		
 		# Scale between 0 and 1:
 		scaled_positions = positions.copy()
@@ -185,33 +179,28 @@ class DNNPositionReconstructor(RSDPositionReconstructor):
 			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
 		
 		for t in range(555):
-			print(f'EPOCH {t}')
-			train(
-				dataloader = self.RSDDataLoader(
+			train_DNN(
+				dataloader = RSDDataLoader(
 					positions = scaled_positions,
 					features = scaled_features,
 					batch_size = int(len(scaled_positions)/11),
 					shuffle = True,
 				),
 				model = self.dnn, 
-				loss_fn = nn.CrossEntropyLoss(),
-				optimizer = torch.optim.SGD(self.dnn.parameters(), lr=1e-3),
+				loss_fn = nn.MSELoss(),
+				optimizer = torch.optim.Adam(self.dnn.parameters(), lr=1e-3),
+				device = self.device,
 			)
 	
 	def reconstruct(self, features):
 		super().reconstruct(features=features)
-		
-		def predict(dataloader, model, loss_fn):
-			print(f'Testing...')
-			
-			return prediction
 		
 		# Scale between 0 and 1:
 		scaled_features = features.copy()
 		for feature in scaled_features.columns:
 			scaled_features[feature] = self.scalers[feature].transform(scaled_features[[feature]])
 		
-		dataloader = self.RSDDataLoader(
+		dataloader = RSDDataLoader(
 			positions = pandas.DataFrame(index=features.index, data=numpy.zeros((len(features),len(self.positions_names))), columns=self.positions_names), # Create fake data just because this requires it, but it will not be used...
 			features = scaled_features,
 			batch_size = len(features),
@@ -220,11 +209,11 @@ class DNNPositionReconstructor(RSDPositionReconstructor):
 		with torch.no_grad():
 			for X, y in dataloader:
 				X = X.to(self.device)
-				prediction = self.dnn(X)
+				scaled_prediction = self.dnn(X)
 		
 		reconstructed = pandas.DataFrame(
 			index = features.index,
-			data = prediction.numpy(),
+			data = scaled_prediction.numpy(),
 			columns = self.positions_names,
 		)
 		for col in reconstructed:

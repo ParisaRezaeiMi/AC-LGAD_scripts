@@ -92,10 +92,15 @@ def reconstruct(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path, for
 			)
 		
 		logging.info(f'Reconstructing...')
-		reconstructed = reconstructor.reconstruct(
-			testing_data[reconstructor.features_names],
-			batch_size = 11111,
-		)
+		if isinstance(reconstructor, reconstructors.DNNPositionReconstructor):
+			reconstructed = reconstructor.reconstruct(
+				testing_data[reconstructor.features_names],
+			)
+		else:
+			reconstructed = reconstructor.reconstruct(
+				testing_data[reconstructor.features_names],
+				batch_size = 11111,
+			)
 		utils.save_dataframe(
 			reconstructed,
 			name = 'reconstructed_positions',
