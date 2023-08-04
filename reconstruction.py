@@ -14,13 +14,18 @@ import plotly.express as px
 
 POSITION_VARIABLES_NAMES = ['x (m)','y (m)']
 
-def reconstruct(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
-	
+def reconstruct(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path, force:bool=False):
 	bureaucrat.check_these_tasks_were_run_successfully('TCT_2D_scan')
 	
 	reconstructor_bureaucrat = RunBureaucrat(path_to_reconstructor_pickle.parent.parent)
 	reconstructor_name = path_to_reconstructor_pickle.parent.parts[-1]
 	reconstructor_bureaucrat.check_these_tasks_were_run_successfully(reconstructor_name)
+	
+	this_task_name = f'reconstruction_using_{reconstructor_name}'
+	
+	if force==False and bureaucrat.was_task_run_successfully(this_task_name):
+		logging.info(f'Task {repr(this_task_name)} was already performed successfully, skipping reconstruction.')
+		return
 	
 	with open(path_to_reconstructor_pickle, 'rb') as ifile:
 		reconstructor = pickle.load(ifile)
@@ -48,7 +53,7 @@ def reconstruct(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
 	amplitude_shared_fraction = data[['ASF']].unstack('n_channel')
 	amplitude_shared_fraction.columns = [f'ASF {n_channel}' for n_channel in amplitude_shared_fraction.columns.get_level_values('n_channel')]
 	
-	with bureaucrat.handle_task(f'reconstruction_using_{reconstructor_name}') as employee:
+	with bureaucrat.handle_task(this_task_name) as employee:
 		json.dump(
 			dict(
 				reconstructor_name = reconstructor_name,
@@ -125,11 +130,14 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 	reconstruction_error = numpy.sum((original-reconstructed)**2, axis=1)**.5
 	reconstruction_error.name = 'Reconstruction error (m)'
 	
-	result = reconstruction_error.groupby('n_position').agg([numpy.nanmean,numpy.nanstd])
+	def q99(x):
+		return numpy.quantile(x, .9)
+	result = reconstruction_error.groupby('n_position').agg([numpy.nanmean,numpy.nanstd,q99])
 	result.rename(
 		columns = {
 			'nanstd': 'Reconstruction error std (m)',
 			'nanmean': 'Reconstruction error mean (m)',
+			'q99': 'Reconstruction error q99 (m)',
 		},
 		inplace = True,
 	)
@@ -147,7 +155,7 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 		)
 		logging.info('Producing and saving plots...')
 		subtitle_lines = [f'Reconstructor: {reconstructor_info["reconstructor_name"]}',f'Training data: {Path(reconstructor_info["path_to_reconstructor_pickle"]).parent.parent.name}']
-		for col in {'Reconstruction error std (m)','Reconstruction error mean (m)'}:
+		for col in result.columns:
 			title = f'{col.replace(" (m)","")}<br><sup>{bureaucrat.run_name}</sup>'
 			title += '<br><sup>' + '</sup><br><sup>'.join(subtitle_lines) + '</sup>'
 			fig = utils.plot_as_xy_heatmap(
@@ -156,7 +164,6 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 				title = title,
 				aspect = 'equal',
 				origin = 'lower',
-				text_auto = True,
 			)
 			fig.write_html(
 				employee.path_to_directory_of_my_task/f'{col}_heatmap.html',
@@ -219,17 +226,18 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 		
 		logging.info(f'Finished with {bureaucrat.run_name}.')
 
-def reconstruct_and_analyze(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
+def reconstruct_and_analyze(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path, force:bool=False):
 	reconstruct(
 		bureaucrat = bureaucrat,
 		path_to_reconstructor_pickle = path_to_reconstructor_pickle,
+		force = force,
 	)
 	analyze_reconstruction(
 		bureaucrat = bureaucrat,
 		reconstruction_task_name = f'reconstruction_using_{path_to_reconstructor_pickle.parent.name}',
 	)
 
-def reconstruct_and_analyze_using_all_available_reconstructors(bureaucrat:RunBureaucrat, bureaucrat_where_to_search_for_reconstructors:RunBureaucrat):
+def reconstruct_and_analyze_using_all_available_reconstructors(bureaucrat:RunBureaucrat, bureaucrat_where_to_search_for_reconstructors:RunBureaucrat, force:bool=False):
 	possible_tasks_having_to_do_with_trained_reconstructors = [p.name for p in bureaucrat_where_to_search_for_reconstructors.path_to_run_directory.iterdir() if p.name[:len('position_reconstructor_')]=='position_reconstructor_']
 	
 	for task_name in possible_tasks_having_to_do_with_trained_reconstructors:
@@ -239,6 +247,7 @@ def reconstruct_and_analyze_using_all_available_reconstructors(bureaucrat:RunBur
 		reconstruct_and_analyze(
 			bureaucrat = bureaucrat,
 			path_to_reconstructor_pickle = bureaucrat_where_to_search_for_reconstructors.path_to_directory_of_task(task_name)/'reconstructor.pickle',
+			force = force,
 		)
 		logging.info(f'Finished reconstructing with {task_name}.')
 	
@@ -271,6 +280,13 @@ if __name__ == '__main__':
 		dest = 'path_to_reconstructor',
 		type = str,
 	)
+	parser.add_argument(
+		'--force',
+		help = 'If this flag is passed, it will force the calculation even if it was already done beforehand. Old data will be deleted.',
+		required = False,
+		dest = 'force',
+		action = 'store_true'
+	)
 	
 	args = parser.parse_args()
 	bureaucrat = RunBureaucrat(Path(args.directory))
@@ -281,4 +297,5 @@ if __name__ == '__main__':
 	reconstruct_and_analyze_using_all_available_reconstructors(
 		bureaucrat = bureaucrat,
 		bureaucrat_where_to_search_for_reconstructors = RunBureaucrat(Path(args.path_to_reconstructor)),
+		force = args.force,
 	)
