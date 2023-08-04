@@ -9,6 +9,7 @@ import logging
 import sqlite3
 import json
 from train_reconstructors import calculate_features
+import matplotlib.pyplot as plt
 
 POSITION_VARIABLES_NAMES = ['x (m)','y (m)']
 
@@ -167,6 +168,38 @@ def analyze_reconstruction(bureaucrat:RunBureaucrat, reconstruction_task_name:st
 				employee.path_to_directory_of_my_task/f'{col}_contour.html',
 				include_plotlyjs = 'cdn',
 			)
+			
+			# Quiver plot with biases ---
+			reconstructed_average = reconstructed.groupby('n_position').agg(numpy.nanmean)
+			reconstructed_average.rename(columns={'x (m)': 'x (m) reconstructed', 'y (m)': 'y (m) reconstructed'}, inplace=True)
+			z = reconstructed_average.merge(positions_data[['n_x','n_y','x (m)','y (m)']], left_index=True, right_index=True)
+			z.set_index(['n_x','n_y'], inplace=True)
+			z = z.unstack('n_x')
+			xx,yy = numpy.meshgrid(sorted(set(positions_data['x (m)'])), sorted(set(positions_data['y (m)'])))
+			fig, ax = plt.subplots()
+			ax.quiver(
+				xx*1e6,
+				yy*1e6,
+				z['x (m) reconstructed'] - xx,
+				z['y (m) reconstructed'] - yy,
+				angles = 'xy', 
+				scale_units = 'xy', 
+				scale = 1e-6,
+				edgecolor = 'blue',
+			)
+			ax.scatter(
+				x = positions_data['x (m)']*1e6,
+				y = positions_data['y (m)']*1e6,
+				c = 'red',
+				s = 1,
+			)
+			ax.set_aspect('equal')
+			ax.set_xlabel('x (µm)')
+			ax.set_ylabel('y (µm)')
+			plt.title(f'Reconstruction bias plot\n{bureaucrat.run_name}')
+			for fmt in {'pdf'}:
+				plt.savefig(employee.path_to_directory_of_my_task/f'vector_plot.{fmt}')
+			
 		logging.info(f'Finished with {bureaucrat.run_name}.')
 
 def reconstruct_and_analyze(bureaucrat:RunBureaucrat, path_to_reconstructor_pickle:Path):
@@ -199,7 +232,7 @@ if __name__ == '__main__':
 	
 	logging.basicConfig(
 		stream = sys.stderr, 
-		level = logging.DEBUG,
+		level = logging.INFO,
 		format = '%(asctime)s|%(levelname)s|%(funcName)s|%(message)s',
 		datefmt = '%Y-%m-%d %H:%M:%S',
 	)
