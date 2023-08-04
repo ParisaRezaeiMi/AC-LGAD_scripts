@@ -51,13 +51,16 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 	with bureaucrat.handle_task('compare_position_reconstrucitons') as employee:
 		
 		DUT_PITCH = 500e-6
-		
+		LABELS_FOR_PLOTS = {
+			'reconstructor_type': 'Reconstructor',
+		}
 		fig = px.ecdf(
 			reconstruction_errors.to_frame().sample(n=5555).merge(reconstructors_info,left_index=True, right_index=True).reset_index(drop=False).sort_values(['reconstructor_type','reconstructor_x_grid']),
 			x = 'Reconstruction error (m)',
 			line_dash = 'reconstructor_type',
 			color = 'reconstructor_x_grid',
 			title = f'Reconstruction error distribution<br><sup>{bureaucrat.run_name}</sup>',
+			labels = LABELS_FOR_PLOTS,
 		)
 		fig.add_vline(
 				x = DUT_PITCH*(2/12)**.5,
@@ -78,7 +81,7 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 				y = col,
 				color = 'reconstructor_type',
 				markers = True,
-				# ~ log_y = True,
+				labels = LABELS_FOR_PLOTS,
 			)
 			fig.add_hline(
 				y = DUT_PITCH*(2/12)**.5,
