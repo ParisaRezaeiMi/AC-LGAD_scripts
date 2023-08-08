@@ -413,6 +413,9 @@ class OnePadTimeReconstructor(RSDTimeReconstructor):
 		return reconstructed_time
 
 class MultipadWeightedTimeReconstructor(RSDTimeReconstructor):
+	def __init__(self, n:int):
+		self.n = n
+		
 	def reconstruct(self, features):
 		"""Reconstruct the impact time for each event.
 		
@@ -467,11 +470,11 @@ class MultipadWeightedTimeReconstructor(RSDTimeReconstructor):
 			for n_channel in features.columns.get_level_values('n_channel').drop_duplicates():
 				time_from_leading_channel[('time',n_channel)] -= _
 			time_from_leading_channel = time_from_leading_channel.stack('n_channel')['time']
-			time_from_leading_channel[(time_from_leading_channel.abs()>100e-12)] = float('NaN')
+			# ~ time_from_leading_channel[(time_from_leading_channel.abs()>1000e-12)] = float('NaN')
 			time_from_leading_channel.name = ''
 			time_from_leading_channel.loc[~time_from_leading_channel.isna()] = 1
 			time_from_leading_channel = time_from_leading_channel.unstack('n_channel')
 			use_these_for_computing_time_resolution = time_from_leading_channel
 		
-		reconstructed_time = (features['time']*features['weight']*use_these_for_computing_time_resolution).sum(axis=1, skipna=True)/(features['weight']*use_these_for_computing_time_resolution).sum(axis=1, skipna=True)
+		reconstructed_time = (features['time']*features['weight']**self.n*use_these_for_computing_time_resolution).sum(axis=1, skipna=True)/(features['weight']**self.n*use_these_for_computing_time_resolution).sum(axis=1, skipna=True)
 		return reconstructed_time

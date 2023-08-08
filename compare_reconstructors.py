@@ -82,7 +82,8 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 			'Reconstruction error q99 (m)': 'Reconstruction error q<sub>99%</sub> (m)',
 			'Reconstruction error q999 (m)': 'Reconstruction error q<sub>99.9%</sub> (m)',
 			'Reconstruction error q100 (m)': 'Reconstruction error q<sub>100%</sub> (m)',
-			'reconstructor_x_grid_n_points': 'Reconstructor grid N×N',
+			'reconstructor_x_grid_n_points': 'Training grid N×N',
+			'Reconstructor x pitch (m)': 'Training grid pitch (m)',
 		}
 		
 		# ECDF plot ----------------------------------------------------
@@ -100,7 +101,7 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 				x,y = ecdf(sample_reconstruction_error_for_square_binary_pixel(pitch=dut_pitch, n=99999))
 				_ = pandas.DataFrame({'x':x,'y':y})
 				_ = _.iloc[numpy.arange(0,len(_)-1,int(len(_)/99))]
-				_name = f'{dut_pitch*1e6:.0f}×{dut_pitch*1e6:.0f} µm<sup>2</sup> binary readout pixel'
+				_name = f'{dut_pitch*1e6:.0f}×{dut_pitch*1e6:.0f} µm<sup>2</sup>'
 				fig.add_trace(
 					go.Scatter(
 						x = _['x'],
@@ -110,6 +111,7 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 						line_color = 'black',
 						showlegend = True if row==1 else False,
 						legendgroup = _name,
+						legendgrouptitle_text = 'Binary readout pixel' if row==1 and dut_pitch==DUT_PITCH else None,
 					),
 					row = row,
 					col = 1,
@@ -118,7 +120,6 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 			employee.path_to_directory_of_my_task/'reconstruction_error_ecdf.html',
 			include_plotlyjs = 'cdn',
 		)
-		
 		for col in statistics:
 			fig = px.line(
 				statistics.merge(reconstructors_info,left_index=True, right_index=True).reset_index(drop=False).sort_values(['reconstructor_type','reconstructor_x_grid_n_points']),
@@ -128,13 +129,26 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 				color = 'reconstructor_type',
 				markers = True,
 				labels = LABELS_FOR_PLOTS,
+				log_y = True,
 			)
+			if 'mean' in col:
+				fig.add_hline(
+					y = numpy.mean(sample_reconstruction_error_for_square_binary_pixel(pitch=DUT_PITCH, n=99999)),
+					annotation_text = f'Mean of {DUT_PITCH*1e6:.0f}×{DUT_PITCH*1e6:.0f} binary readout reconstruction error',
+					line_dash = 'dash',
+				)
+			elif 'std' in col:
+				fig.add_hline(
+					y = numpy.std(sample_reconstruction_error_for_square_binary_pixel(pitch=DUT_PITCH, n=99999)),
+					annotation_text = f'std of {DUT_PITCH*1e6:.0f}×{DUT_PITCH*1e6:.0f} binary readout reconstruction error',
+					line_dash = 'dash',
+				)
 			fig.write_html(
 				employee.path_to_directory_of_my_task/f'{col}.html',
 				include_plotlyjs = 'cdn',
 			)
 		
-		quantiles = reconstruction_errors.groupby('reconstructor_name').quantile([.5,.95,.99])
+		quantiles = reconstruction_errors.groupby('reconstructor_name').quantile([.5,.99])
 		quantiles = quantiles.to_frame()
 		quantiles.reset_index(level=-1,drop=False,inplace=True)
 		quantiles.columns = ['quantile (%)'] + list(quantiles.columns[1:])
@@ -150,6 +164,7 @@ def compare_position_reconstrucitons(bureaucrat:RunBureaucrat):
 				labels = LABELS_FOR_PLOTS,
 				facet_col = 'quantile (%)',
 				log_y = True,
+				log_x = x_axis_variable_name=='Reconstructor x pitch (m)',
 			)
 			for col,q in enumerate(sorted(quantiles['quantile (%)'].drop_duplicates())):
 				error_q = numpy.quantile(a=sample_reconstruction_error_for_square_binary_pixel(DUT_PITCH,n=99999), q=q/100)

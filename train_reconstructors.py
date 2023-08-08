@@ -270,7 +270,7 @@ if __name__ == '__main__':
 	
 	args = parser.parse_args()
 	bureaucrat = RunBureaucrat(Path(args.directory))
-	for n in [2,3,6,8,11,12,13,14,15,16,17,18,19,22,33]:
+	for n in [2,3,6,8,11,12,13,14,15,16,17,18,19,22,27,33]:
 		train_reconstructors(
 			bureaucrat,
 			split_into_n_regions = n
