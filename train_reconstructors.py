@@ -252,7 +252,7 @@ if __name__ == '__main__':
 	
 	logging.basicConfig(
 		stream = sys.stderr, 
-		level = logging.DEBUG,
+		level = logging.INFO,
 		format = '%(asctime)s|%(levelname)s|%(funcName)s|%(message)s',
 		datefmt = '%Y-%m-%d %H:%M:%S',
 	)
