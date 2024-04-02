@@ -11,6 +11,7 @@ from scipy.stats import gaussian_kde
 import warnings
 import logging
 
+
 class RSDPositionReconstructor:
 	def fit(self, positions, features):
 		"""Fit the model using the training data.
